@@ -35,12 +35,12 @@
   joint_trajectory_controller:
     ros__parameters:
       joints:
-        - r1_shoulder_pan_joint
-        - r1_shoulder_lift_joint
-        - r1_elbow_joint
-        - r1_wrist_1_joint
-        - r1_wrist_2_joint
-        - r1_wrist_3_joint
+        - PREFIX_shoulder_pan_joint
+        - PREFIX_shoulder_lift_joint
+        - PREFIX_elbow_joint
+        - PREFIX_wrist_1_joint
+        - PREFIX_wrist_2_joint
+        - PREFIX_wrist_3_joint
       command_interfaces:
         - position
       state_interfaces:
@@ -63,12 +63,12 @@
   scaled_joint_trajectory_controller:
     ros__parameters:
       joints:
-        - r1_shoulder_pan_joint
-        - r1_shoulder_lift_joint
-        - r1_elbow_joint
-        - r1_wrist_1_joint
-        - r1_wrist_2_joint
-        - r1_wrist_3_joint
+        - PREFIX_shoulder_pan_joint
+        - PREFIX_shoulder_lift_joint
+        - PREFIX_elbow_joint
+        - PREFIX_wrist_1_joint
+        - PREFIX_wrist_2_joint
+        - PREFIX_wrist_3_joint
       command_interfaces:
         - position
       state_interfaces:
@@ -91,27 +91,27 @@
   forward_velocity_controller:
     ros__parameters:
       joints:
-        - r1_shoulder_pan_joint
-        - r1_shoulder_lift_joint
-        - r1_elbow_joint
-        - r1_wrist_1_joint
-        - r1_wrist_2_joint
-        - r1_wrist_3_joint
+        - PREFIX_shoulder_pan_joint
+        - PREFIX_shoulder_lift_joint
+        - PREFIX_elbow_joint
+        - PREFIX_wrist_1_joint
+        - PREFIX_wrist_2_joint
+        - PREFIX_wrist_3_joint
       interface_name: velocity
 
   forward_position_controller:
     ros__parameters:
       joints:
-        - r1_shoulder_pan_joint
-        - r1_shoulder_lift_joint
-        - r1_elbow_joint
-        - r1_wrist_1_joint
-        - r1_wrist_2_joint
-        - r1_wrist_3_joint
+        - PREFIX_shoulder_pan_joint
+        - PREFIX_shoulder_lift_joint
+        - PREFIX_elbow_joint
+        - PREFIX_wrist_1_joint
+        - PREFIX_wrist_2_joint
+        - PREFIX_wrist_3_joint
 
   gripper_position_controller:
     ros__parameters:
       joints:
-        - r1_robotiq_85_left_knuckle_joint
+        - PREFIX_robotiq_85_left_knuckle_joint
 
 

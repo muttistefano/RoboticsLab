@@ -17,7 +17,6 @@ from launch.actions import IncludeLaunchDescription,ExecuteProcess
 from launch.actions import GroupAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 import launch_ros.descriptions
-from nav2_common.launch import RewrittenYaml
 import yaml
 import tempfile
 

@@ -14,7 +14,6 @@ from ament_index_python import get_package_share_directory
 from launch.actions import IncludeLaunchDescription
 from launch.actions import GroupAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from scripts import GazeboRosPaths
 
 
 def generate_launch_description():
@@ -39,7 +38,7 @@ def generate_launch_description():
         executable='teleop_node',
         name='teleop_twist_joy_node',
         parameters=[joy_teleop_file],
-        remappings={('/cmd_vel', 'r1_/cmd_vel')},
+        remappings=[('/cmd_vel', 'r1_/cmd_vel')],
         )
 
     nodes_to_start = [

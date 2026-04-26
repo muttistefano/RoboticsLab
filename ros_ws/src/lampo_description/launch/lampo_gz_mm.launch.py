@@ -17,7 +17,6 @@ from launch.actions import IncludeLaunchDescription,ExecuteProcess
 from launch.actions import GroupAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 import launch_ros.descriptions
-from nav2_common.launch import RewrittenYaml
 import yaml
 import tempfile
 
@@ -73,23 +72,29 @@ def generate_launch_description():
         with open(controllers_file, 'r') as f:
             controllers_data = yaml.safe_load(f)
 
-        # Recursively replace r1_ with namespace in the entire YAML structure
+        # Recursively replace PREFIX_ sentinel with the actual namespace in
+        # joint names. Using an explicit sentinel rather than the literal "r1_"
+        # avoids accidentally rewriting unrelated values that happen to share
+        # the default namespace string.
         def replace_in_structure(obj):
             if isinstance(obj, dict):
                 return {key: replace_in_structure(value) for key, value in obj.items()}
             elif isinstance(obj, list):
                 return [replace_in_structure(item) for item in obj]
             elif isinstance(obj, str):
-                return obj.replace('r1_', namespace_str)
+                return obj.replace('PREFIX_', namespace_str)
             else:
                 return obj
 
         controllers_data = replace_in_structure(controllers_data)
 
-        # Write to temporary file
-        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
-        yaml.dump(controllers_data, temp_file)
-        temp_file.close()
+        # Deterministic per-namespace path so repeated launches overwrite the
+        # previous file instead of leaking a fresh tempfile on every run.
+        controllers_out_path = os.path.join(
+            tempfile.gettempdir(), f'lampo_ur_controllers_{namespace_str}.yaml'
+        )
+        with open(controllers_out_path, 'w') as f:
+            yaml.dump(controllers_data, f)
 
         robot_description_content_1 = launch_ros.descriptions.ParameterValue(Command(
         [
@@ -100,7 +105,7 @@ def generate_launch_description():
             " ","omni:=","true",
             " ","mm:=",mm,
             " ","prefix:=",namespace,
-            " ","simulation_controllers:=",temp_file.name,
+            " ","simulation_controllers:=",controllers_out_path,
             ]), value_type=str)
 
   
@@ -149,7 +154,7 @@ def generate_launch_description():
         namespace=namespace,
         name='relay_tf1_to_global',
         arguments=[['tf'], '/tf'],
-
+        parameters=[{"use_sim_time": True}],
     )
 
     tf_1s = Node(
@@ -158,7 +163,7 @@ def generate_launch_description():
         namespace=namespace,
         name='relay_tf1s_to_global',
         arguments=[['tf_static'], '/tf_static'],
-
+        parameters=[{"use_sim_time": True}],
     )
 
     twist_repub = Node(
@@ -232,17 +237,19 @@ def generate_launch_description():
                 elif topic == '/prefix/tf':
                     bridge_item['ros_topic_name'] = f'/{namespace_str}/tf'
 
-        # Write to temporary file
-        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
-        yaml.dump(bridge_data, temp_file)
-        temp_file.close()
+        # Deterministic per-namespace path; see note in create_description_config.
+        bridge_out_path = os.path.join(
+            tempfile.gettempdir(), f'lampo_bridge_{namespace_str}.yaml'
+        )
+        with open(bridge_out_path, 'w') as f:
+            yaml.dump(bridge_data, f)
 
         return [Node(
             package="ros_gz_bridge",
             executable="parameter_bridge",
             namespace=namespace,
             output="screen",
-            parameters=[{"config_file": temp_file.name}, {"use_sim_time": True}],
+            parameters=[{"config_file": bridge_out_path}, {"use_sim_time": True}],
         )]
 
     gz_bridge = OpaqueFunction(function=create_bridge_config)
