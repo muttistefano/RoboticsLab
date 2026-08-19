@@ -1,29 +1,49 @@
 {
-  "name": "ROS2 Desktop with GUI",
+  "name": "RoboticsLab - ROS 2 Kilted + Gazebo Sim",
   "build": {
     "dockerfile": "Dockerfile",
     "context": ".."
   },
+
   "runArgs": [
-    "--env=DISPLAY=host.docker.internal:0",
-    "--env=LIBGL_ALWAYS_SOFTWARE=1",   // Safe fallback
-    "--shm-size=2gb"
+    "--shm-size=2gb",
+    // Gazebo's rendering needs a reasonably large shared memory segment and
+    // direct access to the DRI devices when a GPU is available. On a machine
+    // with no /dev/dri this line is simply ignored by Docker.
+    "--device=/dev/dri:/dev/dri"
   ],
+
   "containerEnv": {
-    "DISPLAY": "host.docker.internal:0",
-    "QT_X11_NO_MITSHM": "1",
-    "XAUTHORITY": "/tmp/.Xauthority"
+    // Linux/macOS: DISPLAY is inherited from the host via localEnv.
+    // Windows + VcXsrv: override this to host.docker.internal:0 (see README).
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "QT_X11_NO_MITSHM": "1"
+    // NOTE: LIBGL_ALWAYS_SOFTWARE is deliberately NOT set. The previous config
+    // forced llvmpipe unconditionally, which makes the textured warehouse
+    // world unusable. Set it manually only if hardware GL is unavailable.
   },
+
+  "mounts": [
+    // X11 socket passthrough for Linux hosts.
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached"
+  ],
+
   "remoteUser": "vscode",
+
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {}
   },
+
+  // Resolve dependencies and set up shell sourcing once, at create time.
+  "postCreateCommand": "/usr/local/bin/setup-ros.sh && sudo rosdep init 2>/dev/null; rosdep update && rosdep install --from-paths ros_ws/src --ignore-src -r -y",
+
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-iot.vscode-ros",
         "twxs.cmake",
-        "ms-vscode.cpptools"
+        "ms-vscode.cpptools",
+        "ms-python.python"
       ]
     }
   }
