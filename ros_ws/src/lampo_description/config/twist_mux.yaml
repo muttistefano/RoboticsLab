@@ -1,0 +1,21 @@
+# Priority arbitration between teleoperation and autonomy.
+# Higher priority wins while its topic is publishing; `timeout` is how long a
+# source stays "active" after its last message.
+# The top-level key is /** (match any node) rather than the node's name.
+# A bare `twist_mux:` key only matches a node whose FULLY QUALIFIED name is
+# `/twist_mux` -- this node runs as `/<namespace>/twist_mux`, so the key never
+# matched and every parameter below was silently ignored, leaving the node on
+# its defaults. Nothing errors; the node simply does not do what this file says.
+/**:
+  ros__parameters:
+    use_stamped: true
+
+    topics:
+      joystick:
+        topic:    cmd_vel_joy
+        timeout:  0.5
+        priority: 100
+      navigation:
+        topic:    cmd_vel_nav
+        timeout:  0.5
+        priority: 10

@@ -1,0 +1,63 @@
+# robot_localization EKF: fuse wheel odometry with the IMU.
+#
+# Why bother, when the drive plugin already publishes odom -> base_footprint?
+# Because that transform is ground truth from the simulator. A real robot has
+# neither. This node consumes exactly what a real robot produces -- a noisy
+# nav_msgs/Odometry and a sensor_msgs/Imu -- and produces the transform itself.
+# It is the honest version of the same signal, and it gives the otherwise
+# unused IMU a consumer.
+#
+# Frame names use the PREFIX_ sentinel, substituted at launch.
+# The top-level key is /** (match any node) rather than the node's name.
+# A bare `ekf_filter_node:` key only matches a node whose FULLY QUALIFIED name is
+# `/ekf_filter_node` -- this node runs as `/<namespace>/ekf_filter_node`, so the key never
+# matched and every parameter below was silently ignored, leaving the node on
+# its defaults. Nothing errors; the node simply does not do what this file says.
+/**:
+  ros__parameters:
+    use_sim_time: true
+    frequency: 30.0
+    sensor_timeout: 0.1
+    two_d_mode: true            # a warehouse AGV lives on a plane
+    publish_tf: true
+    transform_time_offset: 0.0
+    transform_timeout: 0.0
+
+    map_frame: map
+    odom_frame: PREFIX_odom
+    base_link_frame: PREFIX_base_footprint
+    world_frame: PREFIX_odom    # odom-frame EKF: continuous, no jumps
+
+    # --- wheel odometry -------------------------------------------------
+    odom0: odom
+    # x, y, z | roll, pitch, yaw | vx, vy, vz | vroll, vpitch, vyaw | ax, ay, az
+    # Take the VELOCITIES from wheel odometry, not the absolute pose: the pose
+    # is just the integral of the same measurement and feeding it back makes
+    # the filter over-confident.
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, true,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_differential: false
+    odom0_relative: false
+
+    # --- IMU ------------------------------------------------------------
+    imu0: imu
+    # Yaw rate and linear acceleration. Absolute yaw is left out because the
+    # simulated IMU reports a perfect world-frame orientation, which would
+    # make the whole exercise circular.
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  true,  true,  false]
+    imu0_queue_size: 10
+    imu0_differential: false
+    imu0_relative: false
+    imu0_remove_gravitational_acceleration: true
+
+    process_noise_covariance: [0.05, 0.05, 0.06, 0.03, 0.03, 0.06,
+                               0.025, 0.025, 0.04, 0.01, 0.01, 0.02,
+                               0.01, 0.01, 0.015]
