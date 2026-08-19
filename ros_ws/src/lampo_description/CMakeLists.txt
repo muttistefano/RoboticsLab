@@ -55,6 +55,8 @@ if(BUILD_TESTING)
     add_launch_test(test/integration/test_robot.py TIMEOUT 300)
     add_launch_test(test/integration/test_nav2.py TIMEOUT 420)
     add_launch_test(test/integration/test_slam.py TIMEOUT 300)
+    add_launch_test(test/integration/test_ekf.py TIMEOUT 300)
+    add_launch_test(test/integration/test_multirobot.py TIMEOUT 360)
   endif()
 endif()
 

@@ -308,8 +308,11 @@ colcon test --packages-select lampo_description
 
 Those launch a headless Gazebo and check the things only a running system can show: sensors
 publishing, the TF tree resolving, controllers activating in order, the arm reaching a commanded
-pose, Nav2 localising and driving to a goal, `slam_toolbox` building a map, and `twist_mux` letting
-the joystick override navigation.
+pose, Nav2 localising and driving to a goal, `slam_toolbox` building a map, `twist_mux` letting the
+joystick override navigation, the EKF producing a fused estimate, and two robots sharing one world
+without colliding in the ROS graph.
+
+Together: 54 fast tests and 26 simulator tests.
 
 ## 8. Windows — devcontainer with VcXsrv
 
