@@ -14,3 +14,7 @@ __pycache__/
 
 # Personal scratch
 note
+
+# Presentation assets live outside the repository
+doc/presentation/
+*.pptx
