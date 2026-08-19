@@ -38,7 +38,7 @@
       <collision>
         <origin xyz="0 0 0.2" rpy="0 0 0" />
         <geometry>
-          <box size="${base_x_size} ${base_y_size} 0.05"/>
+          <box size="${base_x_size} ${base_y_size} ${base_z_size}"/>
         </geometry>
       </collision>
     </link>
@@ -51,8 +51,9 @@
 
     <link name="${prefix}front_laser">
       <inertial>
-        <mass value="5"/>
-        <inertia ixx="0.145"  ixy="0"  ixz="0" iyy="0.145" iyz="0" izz="0.125" />
+        <mass value="1.1"/>
+        <!-- SICK LMS1xx: solid cylinder r=0.1 m, h=0.005 m -->
+        <inertia ixx="0.00275"  ixy="0"  ixz="0" iyy="0.00275" iyz="0" izz="0.0055" />
       </inertial>
       <visual>
         <geometry>
@@ -66,6 +67,13 @@
       <parent link="${prefix}base_link_sweepee" />
       <child link="${prefix}front_laser" />
     </joint>
+
+    <!-- Keep front_laser as its own SDF link: the lidar sensor's
+         <pose relative_to='${prefix}front_laser'> needs the frame to survive. -->
+    <gazebo reference='${prefix}front_laser_joint'>
+      <disableFixedJointLumping>true</disableFixedJointLumping>
+      <preserveFixedJoint>true</preserveFixedJoint>
+    </gazebo>
 
       <link name='${prefix}front_left_wheel'>
         <inertial>
@@ -212,36 +220,40 @@
       </gazebo>
 
 
-      <joint name='${prefix}front_left_wheel_joint' type='revolute'>
+      <joint name='${prefix}front_left_wheel_joint' type='continuous'>
         <origin xyz="0.3 0.25 0.1" rpy="-1.5707 0 0"/>
         <parent link="${prefix}base_link_sweepee"/>
         <child link="${prefix}front_left_wheel"/>
         <axis xyz="0 0 1"/>
-        <limit effort="10000.0" lower="-1.79769e+308" upper="1.79769e+308" velocity="15.1"/>
+        <limit effort="150.0" velocity="15.1"/>
+      <dynamics damping="0.05" friction="0.1"/>
       </joint>
 
-      <joint name='${prefix}front_right_wheel_joint' type='revolute'>
+      <joint name='${prefix}front_right_wheel_joint' type='continuous'>
         <origin xyz="0.3 -0.25 0.1" rpy="-1.5707 0 0"/>
         <parent link="${prefix}base_link_sweepee"/>
         <child link="${prefix}front_right_wheel"/>
         <axis xyz="0 0 1"/>
-        <limit effort="10000.0" lower="-1.79769e+308" upper="1.79769e+308" velocity="15.1"/>
+        <limit effort="150.0" velocity="15.1"/>
+      <dynamics damping="0.05" friction="0.1"/>
       </joint>
 
-      <joint name='${prefix}rear_left_wheel_joint' type='revolute'>
+      <joint name='${prefix}rear_left_wheel_joint' type='continuous'>
         <origin xyz="-0.3 0.25 0.1" rpy="-1.5707 0 0"/>
         <parent link="${prefix}base_link_sweepee"/>
         <child link="${prefix}rear_left_wheel"/>
         <axis xyz="0 0 1"/>
-        <limit effort="10000.0" lower="-1.79769e+308" upper="1.79769e+308" velocity="15.1"/>
+        <limit effort="150.0" velocity="15.1"/>
+      <dynamics damping="0.05" friction="0.1"/>
       </joint>
 
-      <joint name='${prefix}rear_right_wheel_joint' type='revolute'>
+      <joint name='${prefix}rear_right_wheel_joint' type='continuous'>
         <origin xyz="-0.3 -0.25 0.1" rpy="-1.5707 0 0"/>
         <parent link="${prefix}base_link_sweepee"/>
         <child link="${prefix}rear_right_wheel"/>
         <axis xyz="0 0 1"/>
-        <limit effort="10000.0" lower="-1.79769e+308" upper="1.79769e+308" velocity="15.1"/>
+        <limit effort="150.0" velocity="15.1"/>
+      <dynamics damping="0.05" friction="0.1"/>
       </joint>
 
 
@@ -277,6 +289,17 @@
     </sensor>
   </gazebo>
 
+    <!-- Publish the wheel joint positions. Without this nothing publishes
+         /joint_states for the wheels: joint_state_broadcaster only covers
+         ros2_control joints (the arm/gripper), so robot_state_publisher would
+         never emit the base -> wheel transforms and RViz shows a broken model. -->
+    <gazebo>
+      <plugin filename="gz-sim-joint-state-publisher-system"
+              name="gz::sim::systems::JointStatePublisher">
+        <topic>${prefix}/joint_states</topic>
+      </plugin>
+    </gazebo>
+
   <gazebo>
       <plugin
         filename="gz-sim-diff-drive-system"
@@ -298,7 +321,7 @@
         <frame_id>${prefix}odom</frame_id>
         <odom_topic>${prefix}/odom</odom_topic>
         <child_frame_id>${prefix}base_footprint</child_frame_id>
-        <tf_topic>tf</tf_topic>
+        <tf_topic>/${prefix}/tf</tf_topic>
       </plugin>
     </gazebo>
 

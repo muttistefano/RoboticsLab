@@ -10,51 +10,88 @@
       <origin xyz="0 0 0" rpy="0 0 0" />
   </xacro:robotiq_gripper>
 
-  <ros2_control name="$(arg tf_prefix)/robotiq_control" type="system">
-      <!-- Plugins -->
-      <hardware>
-        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
-      </hardware>
+  <!-- No "/" in the component name: hardware_interface uses it to build
+       parameter and service names, and a slash silently prevents the
+       command interfaces from being exported at all. -->
+  <!-- Gripper actuation is OFF by default (gripper_control:=false).
+       Why: the Robotiq 2F-85 fingers are a closed 4 bar linkage. URDF cannot
+       express a closed chain, so it is approximated with <mimic> joints.
+       Neither engine handles that well:
+         * DART (gz-sim 9) cannot create mimic constraints at all;
+         * Bullet Featherstone can, but the loop is over constrained and the
+           solver drives the knuckle joint far outside its [0, 0.8] limit.
+       ros2_control's joint limiter treats any out of limit reading as a
+       hardware fault and throws a FATAL exception, which aborts the whole
+       simulator. Rather than ship a demo that randomly dies, the gripper is
+       mounted as passive geometry and the arm is the ros2_control example.
+       Set gripper_control:=true to experiment with it. -->
+  <xacro:arg name="gripper_control" default="false" />
 
-      <joint name="$(arg tf_prefix)robotiq_85_left_knuckle_joint">
-        <command_interface name="position" />
-        <state_interface name="position">
-            <param name="initial_value">0.7929</param>
-        </state_interface>
-        <state_interface name="velocity"/>
-      </joint>
-      <!-- When simulating we need to include the rest of the gripper joints -->
-      <joint name="$(arg tf_prefix)robotiq_85_right_knuckle_joint">
-        <param name="mimic">$(arg tf_prefix)robotiq_85_left_knuckle_joint</param>
-        <param name="multiplier">-1</param>
-        <state_interface name="position"/>
-        <state_interface name="velocity"/>
-      </joint>
-      <joint name="$(arg tf_prefix)robotiq_85_left_inner_knuckle_joint">
-        <param name="mimic">$(arg tf_prefix)robotiq_85_left_knuckle_joint</param>
-        <param name="multiplier">1</param>
-        <state_interface name="position"/>
-        <state_interface name="velocity"/>
-      </joint>
-      <joint name="$(arg tf_prefix)robotiq_85_right_inner_knuckle_joint">
-        <param name="mimic">$(arg tf_prefix)robotiq_85_left_knuckle_joint</param>
-        <param name="multiplier">-1</param>
-        <state_interface name="position"/>
-        <state_interface name="velocity"/>
-      </joint>
-      <joint name="$(arg tf_prefix)robotiq_85_left_finger_tip_joint">
-        <param name="mimic">$(arg tf_prefix)robotiq_85_left_knuckle_joint</param>
-        <param name="multiplier">-1</param>
-        <state_interface name="position"/>
-        <state_interface name="velocity"/>
-      </joint>
-      <joint name="$(arg tf_prefix)robotiq_85_right_finger_tip_joint">
-        <param name="mimic">$(arg tf_prefix)robotiq_85_left_knuckle_joint</param>
-        <param name="multiplier">1</param>
-        <state_interface name="position"/>
-        <state_interface name="velocity"/>
-      </joint>
+  <xacro:if value="$(arg gripper_control)">
+    <ros2_control name="$(arg tf_prefix)robotiq_control" type="system">
+        <!-- Plugins -->
+        <hardware>
+          <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+        </hardware>
 
-  </ros2_control>
+        <joint name="$(arg tf_prefix)robotiq_85_left_knuckle_joint">
+          <command_interface name="position">
+            <!-- Widen the limits ros2_control enforces, slightly beyond the
+                 URDF's [0, 0.8]. The Robotiq fingers are a closed 4 bar linkage
+                 that URDF can only approximate with mimic joints, so the solver
+                 settles a few tens of millirad outside the nominal range. The
+                 joint limiter treats that as a hardware fault and throws a fatal
+                 exception, which takes down the whole simulator. -->
+            <param name="min">-0.1</param>
+            <param name="max">0.9</param>
+          </command_interface>
+          <state_interface name="position">
+              <!-- Start the gripper mid range, NOT at either end stop.
+                   ros2_control's joint limiter throws a fatal std::runtime_error
+                   the instant a joint reads outside its limits, which aborts the
+                   whole simulator. The Robotiq 4 bar finger linkage cannot be
+                   expressed exactly in URDF, so a few millirad of physics jitter
+                   is unavoidable: starting at 0 (or at the original 0.7929, a
+                   hair under the 0.8 stop) crossed the limit within one step.
+                   0.4 leaves margin on both sides. Range is [0, 0.8]. -->
+              <param name="initial_value">0.4</param>
+          </state_interface>
+          <state_interface name="velocity"/>
+        </joint>
+        <!-- When simulating we need to include the rest of the gripper joints -->
+        <joint name="$(arg tf_prefix)robotiq_85_right_knuckle_joint">
+          <param name="mimic">$(arg tf_prefix)robotiq_85_left_knuckle_joint</param>
+          <param name="multiplier">-1</param>
+          <state_interface name="position"/>
+          <state_interface name="velocity"/>
+        </joint>
+        <joint name="$(arg tf_prefix)robotiq_85_left_inner_knuckle_joint">
+          <param name="mimic">$(arg tf_prefix)robotiq_85_left_knuckle_joint</param>
+          <param name="multiplier">1</param>
+          <state_interface name="position"/>
+          <state_interface name="velocity"/>
+        </joint>
+        <joint name="$(arg tf_prefix)robotiq_85_right_inner_knuckle_joint">
+          <param name="mimic">$(arg tf_prefix)robotiq_85_left_knuckle_joint</param>
+          <param name="multiplier">-1</param>
+          <state_interface name="position"/>
+          <state_interface name="velocity"/>
+        </joint>
+        <joint name="$(arg tf_prefix)robotiq_85_left_finger_tip_joint">
+          <param name="mimic">$(arg tf_prefix)robotiq_85_left_knuckle_joint</param>
+          <param name="multiplier">-1</param>
+          <state_interface name="position"/>
+          <state_interface name="velocity"/>
+        </joint>
+        <joint name="$(arg tf_prefix)robotiq_85_right_finger_tip_joint">
+          <param name="mimic">$(arg tf_prefix)robotiq_85_left_knuckle_joint</param>
+          <param name="multiplier">1</param>
+          <state_interface name="position"/>
+          <state_interface name="velocity"/>
+        </joint>
+
+    </ros2_control>
+  </xacro:if>
+
 
 </robot>

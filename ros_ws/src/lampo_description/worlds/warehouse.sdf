@@ -2,16 +2,26 @@
 <sdf version='1.10'>
   <world name='world_demo'>
   <gravity>0 0 -9.8</gravity>
-    <physics type='ode'>
-      <max_step_size>0.001</max_step_size>
+    <!-- 2 ms step: controller_manager runs at 500 Hz, so this still gives one
+         control tick per physics step while halving the physics cost. -->
+    <physics name='2ms' type='dart'>
+      <max_step_size>0.002</max_step_size>
       <real_time_factor>1</real_time_factor>
-      <max_contacts>100</max_contacts>
     </physics>
-    
-    <plugin 
-      name='gz::sim::systems::Physics' 
+
+    <plugin
+      name='gz::sim::systems::Physics'
       filename='gz-sim-physics-system'>
-      <render_engine>gz-physics8-bullet-plugin</render_engine>
+      <!-- Engine selection lives HERE, not in <physics type=...>, and the key
+           is <engine><filename>. The original file used <render_engine>, which
+           is a Sensors-system key: it was silently ignored, so the intended
+           Bullet engine never loaded and DART was used all along.
+           Left as DART (the gz-sim default). Bullet Featherstone was tried
+           because DART cannot create mimic constraints, but the Robotiq
+           gripper's closed 4 bar linkage is over constrained under
+           Featherstone and the fingers get flung out of their joint limits.
+           DART with a passive gripper is the stable combination, and DART also
+           has the better trimesh support that the warehouse walls rely on. -->
     </plugin>
 
     <plugin
@@ -58,7 +68,7 @@
           <surface>
             <friction>
               <ode>
-                <mu>50</mu>
+                <mu>1.0</mu>
               </ode>
             </friction>
           </surface>
@@ -80,7 +90,7 @@
     </model>
     
     <model name='Depot'>
-      <static>false</static>
+      <static>true</static>
       <link name='main'>
         <collision name='collision'>
           <pose>0 0 0 0 0 0</pose>
@@ -97,6 +107,38 @@
             <bounce/>
             <contact/>
           </surface>
+        </collision>
+        <collision name='WALLS_collision'>
+          <geometry>
+            <mesh>
+              <scale>0.6 0.6 0.6</scale>
+              <uri>package://lampo_description/worlds/depot/6/meshes/Depot.dae</uri>
+              <submesh>
+                <name>WALLS</name>
+                <center>false</center>
+              </submesh>
+            </mesh>
+          </geometry>
+        </collision>
+        <collision name='PILLERS_collision'>
+          <geometry>
+            <mesh>
+              <scale>0.6 0.6 0.6</scale>
+              <uri>package://lampo_description/worlds/depot/6/meshes/Depot.dae</uri>
+              <submesh>
+                <name>PILLERS</name>
+                <center>false</center>
+              </submesh>
+            </mesh>
+          </geometry>
+        </collision>
+        <collision name='crates_collision'>
+          <geometry>
+            <mesh>
+              <scale>0.6 0.6 0.6</scale>
+              <uri>package://lampo_description/worlds/depot/6/meshes/Crates.dae</uri>
+            </mesh>
+          </geometry>
         </collision>
         <visual name='WALLS_visual'>
           <geometry>
@@ -222,12 +264,6 @@
         </inertial>
         <enable_wind>false</enable_wind>
       </link>
-
-      <joint name='world_joint' type='fixed'>
-        <parent>world</parent>
-        <child>main</child>
-        <pose>0 0 0 0 0 0</pose>
-      </joint>
 
       <pose>7.1900899999999996 1.09982 0 0 0 0</pose>
       <self_collide>false</self_collide>
