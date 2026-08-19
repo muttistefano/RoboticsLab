@@ -1,72 +1,94 @@
+#!/usr/bin/env python3
+"""Worked example: a closed-loop node that drives the robot to x = 0.
+
+Deliberately small, and deliberately idiomatic. It shows the four things a
+ROS 2 control node almost always needs:
+
+  1. a subscription for state              (odometry)
+  2. a publisher for commands              (velocity)
+  3. a timer for the control loop          -- NOT a raw thread + time.sleep()
+  4. sim-time awareness                    (use_sim_time)
+
+Run it after spawning a robot:
+
+    ros2 run lampo_description nodo_prova.py --ros-args \
+        -r __ns:=/r1_ -p use_sim_time:=true
+
+Because the node is launched into the robot's namespace, every topic name
+below is *relative*: 'odom' becomes '/r1_/odom' automatically. Hardcoding
+'/r1_/odom' would tie the node to one robot.
+"""
+
+import math
+
+from geometry_msgs.msg import TwistStamped
+from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
-from std_msgs.msg import String
-from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Twist
-import threading
-import math
-import time
-import numpy 
 
+class GoToOrigin(Node):
+    """Proportional controller on the x axis."""
 
-
-class NodoMio(Node):
     def __init__(self):
-        super().__init__('minimal_publisher')
+        super().__init__('go_to_origin')
 
-        self.publisher_   = self.create_publisher(Twist, '/r1_/cmd_vel', 10)
-        self.subscription = self.create_subscription(
-            Odometry,
-            '/r1_/odom',
-            self.listener_callback,
-            10)
-        
-        # Not needed because we publish cmd vel in the separate thread
-        # timer_period = 0.5 
-        # self.timer = self.create_timer(timer_period, self.timer_callback)
-        self.i = 0
+        # Tunable at runtime: ros2 param set /go_to_origin gain 0.5
+        self.declare_parameter('gain', 0.3)
+        self.declare_parameter('tolerance', 0.05)
+        self.declare_parameter('max_speed', 0.4)
+
         self.odom = None
-        self.t1 = threading.Thread(target=self.algorithm)
-        self.t1.start()
 
+        # Relative names -- resolved against the node's namespace.
+        self.cmd_pub = self.create_publisher(TwistStamped, 'cmd_vel_safe', 10)
+        self.create_subscription(Odometry, 'odom', self.on_odom, 10)
 
-    def listener_callback(self, msg : Odometry):
+        # The control loop. A timer is driven by the node's clock, so with
+        # use_sim_time:=true it follows Gazebo's clock rather than wall time.
+        self.create_timer(0.1, self.control_step)
+
+        self.get_logger().info('Waiting for the first odometry message...')
+
+    def on_odom(self, msg: Odometry):
+        if self.odom is None:
+            self.get_logger().info('First odometry message received.')
         self.odom = msg
 
-    def timer_callback(self):
-        msg = Twist()
-        msg.linear.x = 0.0
-        msg.angular.z = 0.0
-        self.publisher_.publish(msg)
+    def control_step(self):
+        if self.odom is None:
+            return
 
-    def algorithm(self):
-        self.get_logger().info('Thread started')
-        while(self.odom==None):
-            time.sleep(0.1)
-        self.get_logger().info('first odom msg received')
-        while(math.fabs(self.odom.pose.pose.position.x) > 0.05):
-            msg = Twist()
-            msg.linear.x = 0.1 * -1 * numpy.sign(self.odom.pose.pose.position.x)
-            self.publisher_.publish(msg)
-            time.sleep(0.1)
-        msg = Twist()
-        msg.linear.x = 0.0
-        msg.linear.y = 0.0
-        self.publisher_.publish(msg)
-        self.get_logger().info('Thread finished')
-        
+        gain = self.get_parameter('gain').value
+        tolerance = self.get_parameter('tolerance').value
+        max_speed = self.get_parameter('max_speed').value
+
+        error = -self.odom.pose.pose.position.x
+
+        cmd = TwistStamped()
+        cmd.header.stamp = self.get_clock().now().to_msg()
+        cmd.header.frame_id = 'base_link'
+
+        if math.fabs(error) > tolerance:
+            # Proportional term, clamped so we never exceed the base's limits.
+            cmd.twist.linear.x = max(-max_speed,
+                                     min(max_speed, gain * error))
+        else:
+            # Inside the deadband: publish an explicit zero rather than simply
+            # stopping. A robot that stops receiving commands keeps its last
+            # velocity until the driver times out.
+            cmd.twist.linear.x = 0.0
+
+        self.cmd_pub.publish(cmd)
+
 
 def main(args=None):
+    # The context-manager form shuts rclpy down cleanly even on exceptions.
     try:
         with rclpy.init(args=args):
-            minimal_publisher = NodoMio()
-            rclpy.spin(minimal_publisher)
+            rclpy.spin(GoToOrigin())
     except (KeyboardInterrupt, ExternalShutdownException):
-        pass
-
-    finally:
         pass
 
 
