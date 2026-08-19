@@ -12,7 +12,6 @@
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <!-- Core ROS dependencies -->
-  <depend>rclcpp</depend>
   <depend>rclpy</depend>
 
   <!-- Launch and description -->
@@ -20,24 +19,40 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
 
-  <!-- Gazebo and simulation -->
-  <depend>gazebo_ros</depend>
+  <!-- Gazebo (gz sim) and the ROS <-> gz bridge -->
   <exec_depend>ros_gz_sim</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>ros_gz_image</exec_depend>
 
-  <!-- Robot description -->
+  <!-- Robot description: mobile base, UR arm, Robotiq gripper -->
   <exec_depend>ur_description</exec_depend>
+  <exec_depend>ur_simulation_gz</exec_depend>
+  <exec_depend>robotiq_description</exec_depend>
 
   <!-- Messages -->
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>tf2_msgs</exec_depend>
 
-  <!-- Control and manipulation -->
-  <exec_depend>topic_based_ros2_control</exec_depend>
+  <!-- ros2_control: simulated hardware + the controllers we actually spawn -->
+  <exec_depend>gz_ros2_control</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>position_controllers</exec_depend>
+  <exec_depend>joint_trajectory_controller</exec_depend>
+  <exec_depend>velocity_controllers</exec_depend>
+  <exec_depend>ur_controllers</exec_depend>
 
-  <!-- Topic tools -->
+  <!-- Teleoperation -->
+  <exec_depend>joy</exec_depend>
+  <exec_depend>teleop_twist_joy</exec_depend>
+  <exec_depend>twist_mux</exec_depend>
+
+  <!-- Topic tools (TF relays) -->
   <exec_depend>topic_tools</exec_depend>
 
   <!-- Visualization -->
@@ -49,14 +64,27 @@
   <exec_depend>navigation2</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
 
+  <!-- Mapping and state estimation -->
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>robot_localization</exec_depend>
+
+  <!-- Introspection tools the README and DEMO tell the user to run -->
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_tools</exec_depend>
+
   <!-- Testing -->
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>launch_testing</test_depend>
+  <test_depend>launch_testing_ros</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>xacro</test_depend>
+  <test_depend>urdfdom_py</test_depend>
 
   <export>
-    <!-- Gazebo model and media paths -->
-    <gazebo_ros gazebo_model_path="${prefix}/.." />
-    <gazebo_ros gazebo_media_path="${prefix}/meshes"/>
     <build_type>ament_cmake</build_type>
   </export>
 </package>

@@ -1,5 +1,16 @@
-ros_ws/build/
-ros_ws/install/
-ros_ws/log/
-note
+# colcon workspace artifacts
+build/
+install/
+log/
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Editor / OS
+.vscode/
+*.swp
+.DS_Store
+
+# Personal scratch
+note
