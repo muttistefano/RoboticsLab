@@ -1,4 +1,11 @@
 /**:
+  # Applies to every Nav2 node in this file. RewrittenYaml's param_rewrites can
+  # only replace keys that already exist, so a node that never mentions
+  # use_sim_time would silently run on the wall clock while TF is stamped in
+  # sim time. Setting it once here covers all of them.
+  ros__parameters:
+    use_sim_time: True
+
   amcl:
     ros__parameters:
       alpha1: 0.2
@@ -15,7 +22,7 @@
       global_frame_id: "map"
       lambda_short: 0.1
       laser_likelihood_max_dist: 2.0
-      laser_max_range: 100.0
+      laser_max_range: 29.0
       laser_min_range: -1.0
       laser_model_type: "likelihood_field"
       max_beams: 60
@@ -41,9 +48,11 @@
       z_short: 0.05
       scan_topic: lidar
       set_initial_pose: True
-      initial_pose: 
-        x: -4.42
-        y: 0.12
+      # Overwritten at launch from the x/y/yaw arguments so this can never
+      # drift away from the Gazebo spawn pose again.
+      initial_pose:
+        x: -3.5
+        y: 2.2
         yaw: 0.3
       use_sim_time: True
 
@@ -95,6 +104,12 @@
 
   controller_server:
     ros__parameters:
+      # MPPI's validated defaults. Dropping this to 10 Hz was tried and made
+      # things worse: model_dt has to move with it, which lengthens the
+      # prediction horizon, and the controller stopped reaching goals at all.
+      # If this machine cannot sustain 20 Hz the symptom is "Control loop
+      # missed its desired rate" in the log -- close other work rather than
+      # detuning the controller.
       controller_frequency: 20.0
       costmap_update_timeout: 0.30
       min_x_velocity_threshold: 0.001
@@ -111,7 +126,10 @@
       progress_checker:
         plugin: "nav2_controller::SimpleProgressChecker"
         required_movement_radius: 0.5
-        movement_time_allowance: 10.0
+        # Generous on purpose: on a loaded machine the control loop slows
+        # down, and aborting a goal that would have succeeded is the most
+        # confusing failure mode there is.
+        movement_time_allowance: 20.0
       # Goal checker parameters
       #precise_goal_checker:
       #  plugin: "nav2_controller::SimpleGoalChecker"
@@ -126,6 +144,10 @@
       FollowPath:
         plugin: "nav2_mppi_controller::MPPIController"
         time_steps: 56
+        # Must equal the controller period (1 / controller_frequency). MPPI
+        # refuses to configure if the controller period is longer than
+        # model_dt, and the failure surfaces as the entire navigation group
+        # failing to activate -- change the two together, or not at all.
         model_dt: 0.05
         batch_size: 2000
         ax_max: 3.0
@@ -239,7 +261,7 @@
         width: 3
         height: 3
         resolution: 0.05
-        robot_radius: 0.5
+        footprint: "[[0.51, 0.275], [0.51, -0.275], [-0.51, -0.275], [-0.51, 0.275]]"
         plugins: ["voxel_layer", "inflation_layer"]
         filters: ["keepout_filter"]
         keepout_filter:
@@ -285,7 +307,7 @@
         publish_frequency: 1.0
         global_frame: map
         robot_base_frame: prefix/base_footprint
-        robot_radius: 0.5
+        footprint: "[[0.51, 0.275], [0.51, -0.275], [-0.51, -0.275], [-0.51, 0.275]]"
         resolution: 0.05
         track_unknown_space: true
         plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
@@ -487,8 +509,14 @@
       enabled: True
       base_frame_id: prefix/base_footprint
       odom_frame_id: prefix/odom
+      # The Nav2 velocity chain is:
+      #   controller_server -> cmd_vel
+      #   velocity_smoother -> cmd_vel_smoothed
+      #   collision_monitor -> cmd_vel_safe   <- what the robot actually obeys
+      # Publishing back to "cmd_vel" (the smoother's own input) closed a
+      # feedback loop and put the collision monitor outside the control path.
       cmd_vel_in_topic: "cmd_vel_smoothed"
-      cmd_vel_out_topic: "cmd_vel"
+      cmd_vel_out_topic: "cmd_vel_safe"
       state_topic: "collision_monitor_state"
       transform_tolerance: 0.2
       source_timeout: 1.0

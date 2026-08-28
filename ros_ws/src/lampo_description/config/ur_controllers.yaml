@@ -21,11 +21,27 @@
       forward_velocity_controller:
         type: velocity_controllers/JointGroupVelocityController
 
+      # Raw torque passthrough for the dynamics labs (doc/control.md
+      # exercises 4-6): zero_g.py, joint_observer.py and lqr_joint.py all
+      # publish straight into this. Spawned by arm_controller:=effort.
+      forward_effort_controller:
+        type: effort_controllers/JointGroupEffortController
+
       forward_position_controller:
         type: position_controllers/JointGroupPositionController
 
       gripper_position_controller:
         type: position_controllers/JointGroupPositionController
+
+      # The control exercises (doc/control.md). Chainable PID controllers:
+      # one commands joint velocity (the tuning lab), one commands joint
+      # effort (the disturbance & windup lab). Spawned only when
+      # lampo_gz_mm.launch.py is given arm_controller:=pid / effort_pid.
+      arm_pid_controller:
+        type: pid_controller/PidController
+
+      arm_effort_pid_controller:
+        type: pid_controller/PidController
 
 
   speed_scaling_state_broadcaster:
@@ -99,6 +115,16 @@
         - PREFIX_wrist_3_joint
       interface_name: velocity
 
+  forward_effort_controller:
+    ros__parameters:
+      joints:
+        - PREFIX_shoulder_pan_joint
+        - PREFIX_shoulder_lift_joint
+        - PREFIX_elbow_joint
+        - PREFIX_wrist_1_joint
+        - PREFIX_wrist_2_joint
+        - PREFIX_wrist_3_joint
+
   forward_position_controller:
     ros__parameters:
       joints:
@@ -115,3 +141,57 @@
         - PREFIX_robotiq_85_left_knuckle_joint
 
 
+
+
+  # A position PID that outputs joint VELOCITY. The plant (velocity command ->
+  # position) is a pure integrator, so even P alone converges -- which is the
+  # first lesson of doc/control.md, and the reason the effort variant below
+  # exists. Gains are read again on every update cycle: `ros2 param set`
+  # retunes the running controller live.
+  arm_pid_controller:
+    ros__parameters:
+      dof_names:
+        - PREFIX_shoulder_pan_joint
+        - PREFIX_shoulder_lift_joint
+        - PREFIX_elbow_joint
+        - PREFIX_wrist_1_joint
+        - PREFIX_wrist_2_joint
+        - PREFIX_wrist_3_joint
+      command_interface: velocity
+      reference_and_state_interfaces:
+        - position
+      # Hold the current pose at activation instead of snapping to zero.
+      set_current_state_as_first_setpoint: true
+      gains:
+        PREFIX_shoulder_pan_joint:  {p: 2.0, i: 0.0, d: 0.0, u_clamp_max: 1.5,  u_clamp_min: -1.5,  i_clamp_max: 0.5, i_clamp_min: -0.5, antiwindup_strategy: none, activate_state_publisher: true}
+        PREFIX_shoulder_lift_joint: {p: 2.0, i: 0.0, d: 0.0, u_clamp_max: 1.5,  u_clamp_min: -1.5,  i_clamp_max: 0.5, i_clamp_min: -0.5, antiwindup_strategy: none, activate_state_publisher: true}
+        PREFIX_elbow_joint:         {p: 2.0, i: 0.0, d: 0.0, u_clamp_max: 1.5,  u_clamp_min: -1.5,  i_clamp_max: 0.5, i_clamp_min: -0.5, antiwindup_strategy: none, activate_state_publisher: true}
+        PREFIX_wrist_1_joint:       {p: 2.0, i: 0.0, d: 0.0, u_clamp_max: 3.0,  u_clamp_min: -3.0,  i_clamp_max: 0.5, i_clamp_min: -0.5, antiwindup_strategy: none, activate_state_publisher: true}
+        PREFIX_wrist_2_joint:       {p: 2.0, i: 0.0, d: 0.0, u_clamp_max: 3.0,  u_clamp_min: -3.0,  i_clamp_max: 0.5, i_clamp_min: -0.5, antiwindup_strategy: none, activate_state_publisher: true}
+        PREFIX_wrist_3_joint:       {p: 2.0, i: 0.0, d: 0.0, u_clamp_max: 3.0,  u_clamp_min: -3.0,  i_clamp_max: 0.5, i_clamp_min: -0.5, antiwindup_strategy: none, activate_state_publisher: true}
+
+  # A position PID that outputs joint EFFORT (torque). Here gravity is part of
+  # the plant: with P alone the shoulder sags with a visible steady-state
+  # error, the I term removes it, and the u_clamp values (the real UR20 torque
+  # limits) make integral windup observable. The gains below are deliberately
+  # rough STARTING VALUES -- tuning them is the exercise, see doc/control.md.
+  arm_effort_pid_controller:
+    ros__parameters:
+      dof_names:
+        - PREFIX_shoulder_pan_joint
+        - PREFIX_shoulder_lift_joint
+        - PREFIX_elbow_joint
+        - PREFIX_wrist_1_joint
+        - PREFIX_wrist_2_joint
+        - PREFIX_wrist_3_joint
+      command_interface: effort
+      reference_and_state_interfaces:
+        - position
+      set_current_state_as_first_setpoint: true
+      gains:
+        PREFIX_shoulder_pan_joint:  {p: 200.0, i: 0.0, d: 20.0, u_clamp_max: 738.0, u_clamp_min: -738.0, i_clamp_max: 369.0, i_clamp_min: -369.0, antiwindup_strategy: none, activate_state_publisher: true}
+        PREFIX_shoulder_lift_joint: {p: 200.0, i: 0.0, d: 20.0, u_clamp_max: 738.0, u_clamp_min: -738.0, i_clamp_max: 369.0, i_clamp_min: -369.0, antiwindup_strategy: none, activate_state_publisher: true}
+        PREFIX_elbow_joint:         {p: 100.0, i: 0.0, d: 10.0, u_clamp_max: 433.0, u_clamp_min: -433.0, i_clamp_max: 216.0, i_clamp_min: -216.0, antiwindup_strategy: none, activate_state_publisher: true}
+        PREFIX_wrist_1_joint:       {p: 20.0,  i: 0.0, d: 2.0,  u_clamp_max: 107.0, u_clamp_min: -107.0, i_clamp_max: 53.0,  i_clamp_min: -53.0,  antiwindup_strategy: none, activate_state_publisher: true}
+        PREFIX_wrist_2_joint:       {p: 20.0,  i: 0.0, d: 2.0,  u_clamp_max: 107.0, u_clamp_min: -107.0, i_clamp_max: 53.0,  i_clamp_min: -53.0,  antiwindup_strategy: none, activate_state_publisher: true}
+        PREFIX_wrist_3_joint:       {p: 20.0,  i: 0.0, d: 2.0,  u_clamp_max: 107.0, u_clamp_min: -107.0, i_clamp_max: 53.0,  i_clamp_min: -53.0,  antiwindup_strategy: none, activate_state_publisher: true}

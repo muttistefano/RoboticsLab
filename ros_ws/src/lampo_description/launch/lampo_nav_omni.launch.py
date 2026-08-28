@@ -20,7 +20,7 @@ from launch.actions import (DeclareLaunchArgument, GroupAction, IncludeLaunchDes
                             SetEnvironmentVariable)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, PushROSNamespace
 from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
@@ -29,17 +29,17 @@ from nav2_common.launch import RewrittenYaml
 def generate_launch_description() -> LaunchDescription:
     # Get the launch directory
     bringup_dir = get_package_share_directory('nav2_bringup')
-    lampo_dir   = get_package_share_directory('lampo_description')
+    lampo_dir = get_package_share_directory('lampo_description')
     launch_dir = os.path.join(bringup_dir, 'launch')
 
     # Create the launch configuration variables
     namespace = LaunchConfiguration('namespace')
-    slam = LaunchConfiguration('slam')
     keepout_mask_yaml_file = LaunchConfiguration('keepout_mask')
     speed_mask_yaml_file = LaunchConfiguration('speed_mask')
     graph_filepath = LaunchConfiguration('graph')
     use_sim_time = LaunchConfiguration('use_sim_time')
     params_file = LaunchConfiguration('params_file')
+    map_yaml_file = LaunchConfiguration('map')
     autostart = LaunchConfiguration('autostart')
     use_composition = LaunchConfiguration('use_composition')
     use_respawn = LaunchConfiguration('use_respawn')
@@ -47,8 +47,15 @@ def generate_launch_description() -> LaunchDescription:
     use_localization = LaunchConfiguration('use_localization')
     use_keepout_zones = LaunchConfiguration('use_keepout_zones')
     use_speed_zones = LaunchConfiguration('use_speed_zones')
+    initial_x = LaunchConfiguration('x')
+    initial_y = LaunchConfiguration('y')
+    initial_yaw = LaunchConfiguration('yaw')
+    cmd_vel_topic = LaunchConfiguration('cmd_vel_topic')
 
-    # Map fully qualified names to relative ones so the node's namespace can be prepended.
+    # Both transform topics are namespaced. lampo_gz_mm.launch.py publishes
+    # each robot's transforms under its namespace and relays them onto the
+    # global topics for RViz; Nav2 reads the namespaced ones, which is also
+    # what nav2_bringup's own composable-node launch files expect.
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
 
     yaml_substitutions = {
@@ -58,10 +65,30 @@ def generate_launch_description() -> LaunchDescription:
         'prefix/odom': [namespace, 'odom']
     }
 
+    # param_rewrites applies to every node in the file. use_sim_time was
+    # previously set on amcl alone, so the other ~15 Nav2 servers ran on the
+    # wall clock while TF was stamped in sim time -- which shows up as endless
+    # "Lookup would require extrapolation into the future" errors.
+    #
+    # The AMCL seed is taken from the same x/y/yaw the robot is spawned at
+    # (see lampo_gz_mm.launch.py) so the two cannot drift apart.
+    param_substitutions = {
+        'use_sim_time': use_sim_time,
+        'autostart': autostart,
+        'x': initial_x,
+        'y': initial_y,
+        'yaw': initial_yaw,
+        # Where the collision monitor -- the last stage of the velocity chain --
+        # publishes. Default goes straight to the gz bridge. Set it to
+        # cmd_vel_nav when running twist_mux (lampo_joy.launch.py) so the
+        # joystick can override navigation instead of fighting it.
+        'cmd_vel_out_topic': cmd_vel_topic,
+    }
+
     configured_params = RewrittenYaml(
         source_file=params_file,
         root_key='',
-        param_rewrites={},
+        param_rewrites=param_substitutions,
         value_rewrites=yaml_substitutions,
         convert_types=True,
     )
@@ -74,13 +101,22 @@ def generate_launch_description() -> LaunchDescription:
         'namespace', default_value='r1_', description='Top-level namespace'
     )
 
-    declare_slam_cmd = DeclareLaunchArgument(
-        'slam', default_value='False', description='Whether run a SLAM'
+    declare_map_yaml_cmd = DeclareLaunchArgument(
+        'map',
+        default_value=os.path.join(lampo_dir, 'map', 'map.yaml'),
+        description='Full path to map yaml file to load'
     )
 
-    declare_map_yaml_cmd = DeclareLaunchArgument(
-        'map', default_value='', description='Full path to map yaml file to load'
-    )
+    # Spawn pose of the robot this Nav2 instance drives. Keep in sync with the
+    # x/y/yaw passed to lampo_gz_mm.launch.py; AMCL is seeded from these.
+    declare_cmd_vel_topic_cmd = DeclareLaunchArgument(
+        'cmd_vel_topic', default_value='cmd_vel_safe',
+        description='Collision monitor output topic. Use "cmd_vel_nav" when '
+                    'twist_mux is arbitrating with a joystick.')
+
+    declare_x_cmd = DeclareLaunchArgument('x', default_value='-3.5')
+    declare_y_cmd = DeclareLaunchArgument('y', default_value='2.2')
+    declare_yaw_cmd = DeclareLaunchArgument('yaw', default_value='0.3')
 
     declare_keepout_mask_yaml_cmd = DeclareLaunchArgument(
         'keepout_mask', default_value='',
@@ -155,32 +191,26 @@ def generate_launch_description() -> LaunchDescription:
                 name='nav2_container',
                 package='rclcpp_components',
                 executable='component_container_isolated',
-                parameters=[ParameterFile(configured_params, allow_substs=True), {'autostart': autostart}],
+                parameters=[ParameterFile(configured_params, allow_substs=True),
+                            {'autostart': autostart}],
                 arguments=['--ros-args', '--log-level', log_level],
                 remappings=remappings,
                 output='screen',
             ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(launch_dir, 'slam_launch.py')
-                ),
-                condition=IfCondition(PythonExpression([slam, ' and ', use_localization])),
-                launch_arguments={
-                    'namespace': namespace,
-                    'use_sim_time': use_sim_time,
-                    'autostart': autostart,
-                    'use_respawn': use_respawn,
-                    'params_file': configured_params,
-                }.items(),
-            ),
+            # No SLAM here on purpose. nav2_bringup's slam_launch.py would be
+            # started with this file as its params, and nav2_params_omni.yaml
+            # has no slam_toolbox section -- slam_toolbox would come up on
+            # defaults, in unprefixed frames, and quietly not work.
+            # Mapping lives in lampo_slam.launch.py, which is configured for it.
+            # This launch file localises against a map that already exists.
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     os.path.join(launch_dir, 'localization_launch.py')
                 ),
-                condition=IfCondition(PythonExpression(['not ', slam, ' and ', use_localization])),
+                condition=IfCondition(use_localization),
                 launch_arguments={
                     'namespace': namespace,
-                    'map': os.path.join(lampo_dir, 'map', 'map.yaml'),
+                    'map': map_yaml_file,
                     'use_sim_time': use_sim_time,
                     'autostart': autostart,
                     'params_file': configured_params,
@@ -194,11 +224,12 @@ def generate_launch_description() -> LaunchDescription:
                 PythonLaunchDescriptionSource(
                     os.path.join(launch_dir, 'keepout_zone_launch.py')
                 ),
-                condition=IfCondition(PythonExpression([use_keepout_zones])),
+                condition=IfCondition(use_keepout_zones),
                 launch_arguments={
                     'namespace': namespace,
                     'keepout_mask': keepout_mask_yaml_file,
                     'use_sim_time': use_sim_time,
+                    'autostart': autostart,
                     'params_file': configured_params,
                     'use_composition': use_composition,
                     'use_respawn': use_respawn,
@@ -210,11 +241,12 @@ def generate_launch_description() -> LaunchDescription:
                 PythonLaunchDescriptionSource(
                     os.path.join(launch_dir, 'speed_zone_launch.py')
                 ),
-                condition=IfCondition(PythonExpression([use_speed_zones])),
+                condition=IfCondition(use_speed_zones),
                 launch_arguments={
                     'namespace': namespace,
                     'speed_mask': speed_mask_yaml_file,
                     'use_sim_time': use_sim_time,
+                    'autostart': autostart,
                     'params_file': configured_params,
                     'use_composition': use_composition,
                     'use_respawn': use_respawn,
@@ -248,8 +280,11 @@ def generate_launch_description() -> LaunchDescription:
 
     # Declare the launch options
     ld.add_action(declare_namespace_cmd)
-    ld.add_action(declare_slam_cmd)
     ld.add_action(declare_map_yaml_cmd)
+    ld.add_action(declare_cmd_vel_topic_cmd)
+    ld.add_action(declare_x_cmd)
+    ld.add_action(declare_y_cmd)
+    ld.add_action(declare_yaw_cmd)
     ld.add_action(declare_keepout_mask_yaml_cmd)
     ld.add_action(declare_speed_mask_yaml_cmd)
     ld.add_action(declare_graph_file_cmd)

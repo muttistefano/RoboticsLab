@@ -1,0 +1,130 @@
+<?xml version="1.0"?>
+
+<!-- Semantic description of the arm, for MoveIt Servo (arm_controller:=servo).
+
+     The SRDF names the planning group and the link pairs whose collisions are
+     never worth checking. ur_moveit_config ships one, but with bare link
+     names: it cannot describe a prefixed arm, let alone one bolted to a
+     mobile base. This file mirrors it with the prefix applied, plus the pairs
+     the mobile manipulator adds:
+
+       * the arm mount sits INSIDE the chassis collision box (the arm is
+         attached 0.30 m up, the box top is at ~0.375 m), so chassis vs. the
+         arm's first links reads as a permanent collision. Left enabled, Servo
+         would throttle to zero forever before the first command.
+       * the passive gripper and the wrist camera are rigid attachments in
+         permanent contact with the wrist.
+
+     Pairs that stay CHECKED on purpose: elbow/forearm/wrists against the
+     chassis and wheels. An over-eager student jog folding the arm into its
+     own base is exactly what Servo's collision check is there to catch. -->
+
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="$(arg name)">
+
+  <xacro:arg name="name" default="ur"/>
+  <xacro:arg name="prefix" default=""/>
+  <xacro:property name="prefix" value="$(arg prefix)"/>
+
+  <group name="ur_manipulator">
+    <chain base_link="${prefix}base_link" tip_link="${prefix}tool0"/>
+  </group>
+
+  <!-- The spawn pose: shoulder_lift and wrist_1 start at -1.57 (see the
+       integration tests), everything else at zero. -->
+  <group_state name="home" group="ur_manipulator">
+    <joint name="${prefix}shoulder_pan_joint" value="0"/>
+    <joint name="${prefix}shoulder_lift_joint" value="-1.5707"/>
+    <joint name="${prefix}elbow_joint" value="0"/>
+    <joint name="${prefix}wrist_1_joint" value="-1.5707"/>
+    <joint name="${prefix}wrist_2_joint" value="0"/>
+    <joint name="${prefix}wrist_3_joint" value="0"/>
+  </group_state>
+
+  <xacro:macro name="nocollide" params="a b reason:=Adjacent">
+    <disable_collisions link1="${prefix}${a}" link2="${prefix}${b}"
+                        reason="${reason}"/>
+  </xacro:macro>
+
+  <!-- The arm itself: the pair list from ur_moveit_config, prefixed. -->
+  <xacro:nocollide a="base_link" b="base_link_inertia"/>
+  <xacro:nocollide a="base_link_inertia" b="shoulder_link"/>
+  <xacro:nocollide a="shoulder_link" b="upper_arm_link"/>
+  <xacro:nocollide a="upper_arm_link" b="forearm_link"/>
+  <xacro:nocollide a="forearm_link" b="wrist_1_link"/>
+  <xacro:nocollide a="wrist_1_link" b="wrist_2_link"/>
+  <xacro:nocollide a="wrist_1_link" b="wrist_3_link" reason="Never"/>
+  <xacro:nocollide a="wrist_2_link" b="wrist_3_link"/>
+  <xacro:nocollide a="tool0" b="wrist_1_link" reason="Never"/>
+  <xacro:nocollide a="tool0" b="wrist_2_link" reason="Never"/>
+  <xacro:nocollide a="tool0" b="wrist_3_link"/>
+
+  <!-- The mount: chassis vs. the links that live in or touch its box. -->
+  <xacro:nocollide a="base_link_sweepee" b="base_link"/>
+  <xacro:nocollide a="base_link_sweepee" b="base_link_inertia"/>
+  <xacro:nocollide a="base_link_sweepee" b="shoulder_link"/>
+  <xacro:nocollide a="base_link_sweepee" b="front_laser"/>
+  <xacro:nocollide a="base_link_sweepee" b="front_left_wheel"/>
+  <xacro:nocollide a="base_link_sweepee" b="front_right_wheel"/>
+  <xacro:nocollide a="base_link_sweepee" b="rear_left_wheel"/>
+  <xacro:nocollide a="base_link_sweepee" b="rear_right_wheel"/>
+
+  <!-- The wrist camera: rigid on wrist_3, next to the gripper mount. -->
+  <xacro:nocollide a="cam_link" b="wrist_3_link"/>
+  <xacro:nocollide a="cam_link" b="tool0"/>
+  <xacro:nocollide a="cam_link" b="robotiq_85_base_link"/>
+
+  <!-- The gripper: one rigid-ish assembly on tool0. Its links against the
+       wrist, and every internal pair: finger self-collision is not what
+       this lab teaches. -->
+  <xacro:macro name="gripper_link" params="a">
+    <xacro:nocollide a="${a}" b="wrist_3_link" reason="Never"/>
+    <xacro:nocollide a="${a}" b="tool0" reason="Never"/>
+  </xacro:macro>
+  <xacro:gripper_link a="robotiq_85_base_link"/>
+  <xacro:gripper_link a="robotiq_85_left_knuckle_link"/>
+  <xacro:gripper_link a="robotiq_85_right_knuckle_link"/>
+  <xacro:gripper_link a="robotiq_85_left_finger_link"/>
+  <xacro:gripper_link a="robotiq_85_right_finger_link"/>
+  <xacro:gripper_link a="robotiq_85_left_inner_knuckle_link"/>
+  <xacro:gripper_link a="robotiq_85_right_inner_knuckle_link"/>
+  <xacro:gripper_link a="robotiq_85_left_finger_tip_link"/>
+  <xacro:gripper_link a="robotiq_85_right_finger_tip_link"/>
+
+  <xacro:nocollide a="robotiq_85_base_link" b="robotiq_85_left_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_base_link" b="robotiq_85_right_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_base_link" b="robotiq_85_left_finger_link"/>
+  <xacro:nocollide a="robotiq_85_base_link" b="robotiq_85_right_finger_link"/>
+  <xacro:nocollide a="robotiq_85_base_link" b="robotiq_85_left_inner_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_base_link" b="robotiq_85_right_inner_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_base_link" b="robotiq_85_left_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_base_link" b="robotiq_85_right_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_left_knuckle_link" b="robotiq_85_right_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_left_knuckle_link" b="robotiq_85_left_finger_link"/>
+  <xacro:nocollide a="robotiq_85_left_knuckle_link" b="robotiq_85_right_finger_link"/>
+  <xacro:nocollide a="robotiq_85_left_knuckle_link" b="robotiq_85_left_inner_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_left_knuckle_link" b="robotiq_85_right_inner_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_left_knuckle_link" b="robotiq_85_left_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_left_knuckle_link" b="robotiq_85_right_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_right_knuckle_link" b="robotiq_85_left_finger_link"/>
+  <xacro:nocollide a="robotiq_85_right_knuckle_link" b="robotiq_85_right_finger_link"/>
+  <xacro:nocollide a="robotiq_85_right_knuckle_link" b="robotiq_85_left_inner_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_right_knuckle_link" b="robotiq_85_right_inner_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_right_knuckle_link" b="robotiq_85_left_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_right_knuckle_link" b="robotiq_85_right_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_left_finger_link" b="robotiq_85_right_finger_link"/>
+  <xacro:nocollide a="robotiq_85_left_finger_link" b="robotiq_85_left_inner_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_left_finger_link" b="robotiq_85_right_inner_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_left_finger_link" b="robotiq_85_left_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_left_finger_link" b="robotiq_85_right_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_right_finger_link" b="robotiq_85_left_inner_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_right_finger_link" b="robotiq_85_right_inner_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_right_finger_link" b="robotiq_85_left_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_right_finger_link" b="robotiq_85_right_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_left_inner_knuckle_link" b="robotiq_85_right_inner_knuckle_link"/>
+  <xacro:nocollide a="robotiq_85_left_inner_knuckle_link" b="robotiq_85_left_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_left_inner_knuckle_link" b="robotiq_85_right_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_right_inner_knuckle_link" b="robotiq_85_left_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_right_inner_knuckle_link" b="robotiq_85_right_finger_tip_link"/>
+  <xacro:nocollide a="robotiq_85_left_finger_tip_link" b="robotiq_85_right_finger_tip_link"/>
+
+</robot>

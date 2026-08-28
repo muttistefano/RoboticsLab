@@ -1,81 +1,99 @@
-- ros_topic_name: "/prefix/cmd_vel"
-  ros_type_name: "geometry_msgs/msg/Twist"
+# ros_gz_bridge topic map for one LAMPO robot.
+#
+# "/prefix/" is a sentinel: lampo_gz_mm.launch.py rewrites it to the robot's
+# namespace before handing this file to parameter_bridge. Add topics freely --
+# the rewrite is a plain string substitution, not a per-topic whitelist.
+#
+# NOTE on cmd_vel: Kilted's ros_gz_bridge ships a TwistStamped <-> gz.msgs.Twist
+# converter, so Nav2 (which publishes TwistStamped) talks to the Gazebo drive
+# plugin directly. No republisher node is needed.
+
+# ROS side is cmd_vel_safe -- the collision monitor's output, i.e. the last
+# stage of the Nav2 velocity chain. The gz side keeps the name the drive
+# plugin in the URDF listens on.
+- ros_topic_name: "/prefix/cmd_vel_safe"
+  gz_topic_name: "/prefix/cmd_vel"
+  ros_type_name: "geometry_msgs/msg/TwistStamped"
   gz_type_name: "gz.msgs.Twist"
-  subscriber_queue: 10  
-  publisher_queue: 10        
-  lazy: false               
-  direction: BIDIRECTIONAL  
-                            
+  subscriber_queue: 10
+  publisher_queue: 10
+  lazy: false
+  direction: ROS_TO_GZ
+
 - ros_topic_name: "/prefix/odom"
   ros_type_name: "nav_msgs/msg/Odometry"
   gz_type_name: "gz.msgs.Odometry"
-  subscriber_queue: 10      
-  publisher_queue: 10       
-  lazy: false              
-  direction: GZ_TO_ROS                                              
-                            
+  subscriber_queue: 10
+  publisher_queue: 10
+  lazy: false
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/prefix/joint_states"
+  ros_type_name: "sensor_msgs/msg/JointState"
+  gz_type_name: "gz.msgs.Model"
+  subscriber_queue: 10
+  publisher_queue: 10
+  lazy: false
+  direction: GZ_TO_ROS
+
 - ros_topic_name: "/prefix/lidar"
   ros_type_name: "sensor_msgs/msg/LaserScan"
   gz_type_name: "gz.msgs.LaserScan"
-  subscriber_queue: 10       
-  publisher_queue: 10        
-  lazy: false               
-  direction: GZ_TO_ROS                                           
+  subscriber_queue: 10
+  publisher_queue: 10
+  lazy: false
+  direction: GZ_TO_ROS
 
 - ros_topic_name: "/prefix/imu"
   ros_type_name: "sensor_msgs/msg/Imu"
   gz_type_name: "gz.msgs.IMU"
-  subscriber_queue: 10       
-  publisher_queue: 10        
-  lazy: false               
-  direction: GZ_TO_ROS  
+  subscriber_queue: 10
+  publisher_queue: 10
+  lazy: false
+  direction: GZ_TO_ROS
 
 - ros_topic_name: "/prefix/rgbd_camera/camera_info"
   ros_type_name: "sensor_msgs/msg/CameraInfo"
   gz_type_name: "gz.msgs.CameraInfo"
-  subscriber_queue: 10       
-  publisher_queue: 10        
-  lazy: false               
-  direction: GZ_TO_ROS  
+  subscriber_queue: 10
+  publisher_queue: 10
+  lazy: false
+  direction: GZ_TO_ROS
 
 - ros_topic_name: "/prefix/rgbd_camera/depth_image"
   ros_type_name: "sensor_msgs/msg/Image"
   gz_type_name: "gz.msgs.Image"
-  subscriber_queue: 10       
-  publisher_queue: 10        
-  lazy: false               
-  direction: GZ_TO_ROS  
+  subscriber_queue: 10
+  publisher_queue: 10
+  lazy: false
+  direction: GZ_TO_ROS
 
 - ros_topic_name: "/prefix/rgbd_camera/image"
   ros_type_name: "sensor_msgs/msg/Image"
   gz_type_name: "gz.msgs.Image"
-  subscriber_queue: 10       
-  publisher_queue: 10        
-  lazy: false               
-  direction: GZ_TO_ROS  
+  subscriber_queue: 10
+  publisher_queue: 10
+  lazy: false
+  direction: GZ_TO_ROS
 
-- ros_topic_name: "/clock"
-  ros_type_name: "rosgraph_msgs/msg/Clock"
-  gz_type_name: "gz.msgs.Clock"
-  subscriber_queue: 10       
-  publisher_queue: 10        
-  lazy: false               
-  direction: GZ_TO_ROS  
-                            
+- ros_topic_name: "/prefix/rgbd_camera/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  subscriber_queue: 10
+  publisher_queue: 10
+  lazy: false
+  direction: GZ_TO_ROS
+
+# odom -> base_footprint, published by the drive plugin in the URDF.
+# The gz side is namespaced (<tf_topic>${prefix}/tf</tf_topic>) so that with
+# several robots each bridge carries only its own transforms; previously every
+# robot published onto one global gz /tf and each bridge re-broadcast all of
+# them, giving O(N^2) traffic and TF_REPEATED_DATA spam.
 - ros_topic_name: "/prefix/tf"
-  gz_topic_name: /tf
+  gz_topic_name: "/prefix/tf"
   ros_type_name: "tf2_msgs/msg/TFMessage"
   gz_type_name: "gz.msgs.Pose_V"
   subscriber_queue: 10
   publisher_queue: 10
   lazy: false
   direction: GZ_TO_ROS
-
-
-
-
-                                       
-
-
-
-                    

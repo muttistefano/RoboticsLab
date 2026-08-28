@@ -1,51 +1,75 @@
-import os
-from os import environ
-from os import pathsep
-import sys
+r"""Joystick teleoperation, arbitrated against Nav2 by twist_mux.
+
+Without an arbiter the joystick and the navigation stack publish to the same
+topic and fight each other. twist_mux subscribes to both, and forwards
+whichever has the highest priority and is currently active -- so grabbing the
+joystick always overrides autonomy, which is what you want on a real robot.
+
+    joystick  --(prio 100)--\\
+                             twist_mux --> <ns>/cmd_vel_safe --> gz
+    Nav2      --(prio  10)--/
+"""
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, TimerAction
-from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from launch.substitutions import PathJoinSubstitution, TextSubstitution
-from launch.actions import OpaqueFunction
-from ament_index_python import get_package_share_directory
-from launch.actions import IncludeLaunchDescription
-from launch.actions import GroupAction
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
-def generate_launch_description():
-
-
-    joy_teleop_file = PathJoinSubstitution(
-        [FindPackageShare("lampo_description"), "config", "joy.yaml"]
-    )
-
+def launch_setup(context, *args, **kwargs):
+    namespace = LaunchConfiguration('namespace').perform(context)
 
     joy_node = Node(
         package='joy',
         executable='joy_node',
+        namespace=namespace,
         name='joy_node',
         parameters=[{
-            'deadzone': 0.3,
+            'device_id': LaunchConfiguration('joy_id'),
+            'deadzone': 0.05,
             'autorepeat_rate': 20.0,
-        }])
+            'use_sim_time': True,
+        }],
+    )
 
-    joy_node_teleop = Node(
+    teleop_node = Node(
         package='teleop_twist_joy',
         executable='teleop_node',
+        namespace=namespace,
         name='teleop_twist_joy_node',
-        parameters=[joy_teleop_file],
-        remappings=[('/cmd_vel', 'r1_/cmd_vel')],
-        )
+        parameters=[
+            PathJoinSubstitution(
+                [FindPackageShare('lampo_description'), 'config', 'joy.yaml']),
+            {'use_sim_time': True},
+        ],
+        # Into twist_mux, not straight at the robot.
+        remappings=[('/cmd_vel', 'cmd_vel_joy')],
+    )
 
-    nodes_to_start = [
-        joy_node,
-        joy_node_teleop,
-    ]
+    twist_mux_node = Node(
+        package='twist_mux',
+        executable='twist_mux',
+        namespace=namespace,
+        name='twist_mux',
+        output='screen',
+        parameters=[
+            PathJoinSubstitution([FindPackageShare('lampo_description'),
+                                  'config', 'twist_mux.yaml']),
+            {'use_sim_time': True},
+        ],
+        remappings=[('cmd_vel_out', 'cmd_vel_safe')],
+    )
 
-    return LaunchDescription(nodes_to_start)
+    return [joy_node, teleop_node, twist_mux_node]
 
 
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('namespace', default_value='r1_',
+                              description='Robot to drive. Must match the '
+                                          'namespace used when spawning.'),
+        DeclareLaunchArgument('joy_id', default_value='0',
+                              description='Joystick index, /dev/input/js<N>.'),
+        OpaqueFunction(function=launch_setup),
+    ])

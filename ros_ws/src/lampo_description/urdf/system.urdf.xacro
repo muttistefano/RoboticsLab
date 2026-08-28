@@ -1,6 +1,10 @@
 <?xml version="1.0"?>
 
-<robot name="$(arg prefix)/mm1" xmlns:xacro="http://ros.org/wiki/xacro" xmlns:gz="http://gazebosim.org/schema">>
+<robot name="$(arg prefix)mm1" xmlns:xacro="http://ros.org/wiki/xacro" xmlns:gz="http://gazebosim.org/schema">
+
+  <!-- TF/topic prefix for this robot. Must end with a separator (e.g. "r1_")
+       because every link and joint name is built as ${prefix}<name>. -->
+  <xacro:arg name="prefix" default="r1_" />
 
   <xacro:arg name="omni" default="false" />
   <xacro:arg name="mm" default="false" />

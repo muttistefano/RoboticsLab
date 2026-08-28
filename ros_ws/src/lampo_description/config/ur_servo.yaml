@@ -1,0 +1,58 @@
+# MoveIt Servo, for the Cartesian exercise (arm_controller:=servo).
+#
+# Servo turns a stream of Cartesian twists into joint velocities, decelerating
+# near singularities, joint limits and collisions. Output goes to the
+# forward_velocity_controller as a plain Float64MultiArray -- no trajectory,
+# no planner, just a resolved-rate loop students can feel.
+#
+# Topics here are RELATIVE on purpose: the node runs inside the robot's
+# namespace, so `joint_states` resolves to /<ns>/joint_states and the file
+# needs no per-robot rewriting. The tunable parameters (scale.*, the
+# singularity thresholds) are live -- rqt_reconfigure moves them while the
+# arm is being jogged. See doc/control.md.
+/**:
+  ros__parameters:
+    moveit_servo:
+      move_group_name: ur_manipulator
+
+      # Incoming commands are physical units: m/s and rad/s.
+      command_in_type: speed_units
+      scale:
+        linear: 0.4
+        rotational: 0.8
+        joint: 0.5
+      # Keyboard jogging sends bursts; a short grace period between them
+      # keeps the motion smooth without letting a stale command run on.
+      incoming_command_timeout: 0.25
+
+      publish_period: 0.01
+      max_expected_latency: 0.1
+
+      # What the forward_velocity_controller expects on its `commands` topic.
+      command_out_type: std_msgs/Float64MultiArray
+      command_out_topic: forward_velocity_controller/commands
+      publish_joint_positions: false
+      publish_joint_velocities: true
+      publish_joint_accelerations: false
+
+      joint_topic: joint_states
+      is_primary_planning_scene_monitor: true
+      check_octomap_collisions: false
+
+      # Butterworth, not the acceleration-limited filter: the UR20 limits
+      # file declares no acceleration limits, which that filter requires.
+      use_smoothing: true
+      smoothing_filter_plugin_name: online_signal_smoothing::ButterworthFilterPlugin
+
+      # The lesson: stretch the arm out and watch these two take over.
+      lower_singularity_threshold: 10.0
+      hard_stop_singularity_threshold: 30.0
+      leaving_singularity_threshold_multiplier: 2.0
+
+      check_collisions: true
+      collision_check_rate: 10.0
+      self_collision_proximity_threshold: 0.01
+      scene_collision_proximity_threshold: 0.02
+
+      # One value, applied to every joint [rad].
+      joint_limit_margins: [0.1]

@@ -1,305 +1,320 @@
-import os
-from os import environ
-from os import pathsep
-import sys
-from pathlib import Path
+"""Spawn one LAMPO robot into an already-running Gazebo world.
 
-from launch import LaunchDescription, LaunchContext, LaunchService
-from launch.actions import DeclareLaunchArgument, TimerAction
-from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
-from launch.conditions import IfCondition
-from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
-from launch.substitutions import PathJoinSubstitution, TextSubstitution
-from launch.actions import OpaqueFunction
-from ament_index_python import get_package_share_directory
-from launch.actions import IncludeLaunchDescription,ExecuteProcess 
-from launch.actions import GroupAction
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-import launch_ros.descriptions
-import yaml
+Start the world first with lampo_sandbox.launch.py, then run this once per
+robot with a distinct `namespace`.
+
+Bring-up order matters and is enforced with event handlers, not sleeps:
+
+    robot_state_publisher  ->  publishes <ns>/robot_description
+    ros_gz_sim create      ->  reads that topic, inserts the model
+    (gz_ros2_control now creates the controller_manager)
+    joint_state_broadcaster -> forward_position_controller -> gripper
+
+Each step waits for the previous process to exit, so the sequence is correct
+on a cold cache and on a slow laptop alike.
+"""
+
+import os
 import tempfile
 
+from ament_index_python import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import (DeclareLaunchArgument, OpaqueFunction,
+                            RegisterEventHandler)
+from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
+from launch.substitutions import (Command, FindExecutable, LaunchConfiguration,
+                                  PathJoinSubstitution)
+from launch_ros.actions import Node
+import launch_ros.descriptions
+from launch_ros.substitutions import FindPackageShare
+import yaml
+
+# The sentinel used inside config/*.yaml for "this robot's namespace".
+PREFIX_SENTINEL = 'PREFIX_'
 
 
+def _substitute(obj, namespace):
+    """Replace PREFIX_ with the namespace in every string, key or value.
 
-def generate_launch_description():
+    Keys matter: joint_trajectory_controller looks up per-joint tolerances as
+    constraints.<actual_joint_name>, so the constraint keys have to be
+    rewritten too, not just the entries of the `joints:` list.
+    """
+    if isinstance(obj, dict):
+        return {_substitute(k, namespace): _substitute(v, namespace)
+                for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_substitute(i, namespace) for i in obj]
+    if isinstance(obj, str):
+        return obj.replace(PREFIX_SENTINEL, namespace)
+    return obj
 
-    declared_arguments = []
 
-    declared_arguments.append(
-        DeclareLaunchArgument(
-            "description_package",
-            default_value="lampo_description",
-            description="mobile manip description",
-        )
+def _render_config(name, namespace):
+    """Read config/<name>, substitute the namespace, write it to a temp file.
+
+    The file is per-user and per-namespace: a predictable path in a shared
+    /tmp would collide between students on a lab machine.
+    """
+    src = os.path.join(get_package_share_directory('lampo_description'),
+                       'config', name)
+    with open(src) as f:
+        data = yaml.safe_load(f)
+
+    out_dir = os.path.join(tempfile.gettempdir(), f'lampo_{os.getuid()}')
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, f'{namespace}{name}')
+    with open(out, 'w') as f:
+        yaml.dump(_substitute(data, namespace), f)
+    return out
+
+
+def launch_setup(context, *args, **kwargs):
+    namespace = LaunchConfiguration('namespace').perform(context)
+    mm = LaunchConfiguration('mm')
+    arm_controller = LaunchConfiguration('arm_controller').perform(context)
+    if arm_controller not in ('forward', 'pid', 'effort_pid', 'servo',
+                              'effort'):
+        raise RuntimeError(
+            f'arm_controller must be forward, pid, effort_pid, servo or '
+            f'effort, not "{arm_controller}"')
+
+    controllers_file = _render_config('ur_controllers.yaml', namespace)
+
+    robot_description = launch_ros.descriptions.ParameterValue(
+        Command([
+            PathJoinSubstitution([FindExecutable(name='xacro')]), ' ',
+            PathJoinSubstitution([FindPackageShare(
+                LaunchConfiguration('description_package')), 'urdf',
+                LaunchConfiguration('description_file')]),
+            ' ', 'name:=', namespace, 'mm1',
+            ' ', 'omni:=', LaunchConfiguration('omni'),
+            ' ', 'mm:=', mm,
+            ' ', 'gripper_control:=',
+            LaunchConfiguration('gripper_control'),
+            ' ', 'prefix:=', namespace,
+            ' ', 'simulation_controllers:=', controllers_file,
+        ]), value_type=str)
+
+    robot_state_publisher = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        namespace=namespace,
+        output='screen',
+        # Both transform topics are namespaced, and both are relayed onto the
+        # global topics below.
+        #
+        # /tf_static must be namespaced: Nav2's servers are composable nodes
+        # loaded by nav2_bringup's own launch files, which remap /tf_static to
+        # <ns>/tf_static. Publishing statics only on the global topic leaves
+        # that namespaced topic with no publisher at all, so AMCL never learns
+        # base_footprint -> front_laser and silently drops every scan --
+        # the stack reports "active" and the robot simply never localises.
+        remappings=[('/tf', 'tf'), ('/tf_static', 'tf_static')],
+        parameters=[{'robot_description': robot_description},
+                    {'use_sim_time': True}],
     )
 
-    declared_arguments.append(
-        DeclareLaunchArgument(
-            "description_file",
-            default_value="system.urdf.xacro",
-            description="URDF/XACRO description file with the robot.",
-        )
-    )
-
-    declared_arguments.append(
-        DeclareLaunchArgument(
-            "mm",
-            default_value='false',
-            description="mobile manipulators",
-        )
-    )
-    
-    declared_arguments.append(
-        DeclareLaunchArgument(
-            "namespace",
-            default_value="r1_",
-            description="Namespace and tf prefix for the robot"
-        )
-    )
-
-    namespace                = LaunchConfiguration("namespace")
-    description_package      = LaunchConfiguration("description_package")
-    description_file         = LaunchConfiguration("description_file")
-    mm                       = LaunchConfiguration("mm")
-
-    def create_description_config(context):
-        namespace_str = context.perform_substitution(namespace)
-
-        # Load original ur_controllers config
-        controllers_file = os.path.join(get_package_share_directory('lampo_description'), 'config', 'ur_controllers.yaml')
-        with open(controllers_file, 'r') as f:
-            controllers_data = yaml.safe_load(f)
-
-        # Recursively replace PREFIX_ sentinel with the actual namespace in
-        # joint names. Using an explicit sentinel rather than the literal "r1_"
-        # avoids accidentally rewriting unrelated values that happen to share
-        # the default namespace string.
-        def replace_in_structure(obj):
-            if isinstance(obj, dict):
-                return {key: replace_in_structure(value) for key, value in obj.items()}
-            elif isinstance(obj, list):
-                return [replace_in_structure(item) for item in obj]
-            elif isinstance(obj, str):
-                return obj.replace('PREFIX_', namespace_str)
-            else:
-                return obj
-
-        controllers_data = replace_in_structure(controllers_data)
-
-        # Deterministic per-namespace path so repeated launches overwrite the
-        # previous file instead of leaking a fresh tempfile on every run.
-        controllers_out_path = os.path.join(
-            tempfile.gettempdir(), f'lampo_ur_controllers_{namespace_str}.yaml'
-        )
-        with open(controllers_out_path, 'w') as f:
-            yaml.dump(controllers_data, f)
-
-        robot_description_content_1 = launch_ros.descriptions.ParameterValue(Command(
-        [
-            PathJoinSubstitution([FindExecutable(name="xacro")]),
-            " ",
-            PathJoinSubstitution([FindPackageShare(description_package), "urdf", description_file]),
-            " ","name:=",namespace,"/mm1",
-            " ","omni:=","true",
-            " ","mm:=",mm,
-            " ","prefix:=",namespace,
-            " ","simulation_controllers:=",controllers_out_path,
-            ]), value_type=str)
-
-  
-
-        robot_description_1  = {"robot_description": robot_description_content_1}
-        frame_prefix_param_1 = {"frame_prefix": ""}
-
-        robot_state_publisher_node_1 = Node(
-            package="robot_state_publisher",
-            executable="robot_state_publisher",
-            namespace=namespace,
-            output="screen",
-            remappings=[
-                ('/tf', 'tf'),
-                ('/tf_static', 'tf_static')
-            ],
-            parameters=[robot_description_1,frame_prefix_param_1,{"use_sim_time": True}],
-        )
-
-        return [robot_state_publisher_node_1]
-
-    robot_state_publisher_node_1 = OpaqueFunction(function=create_description_config)
-
-
-
-    spawn_sweepee_1 = Node(
-        name='spawn1',
+    spawn = Node(
+        name='spawn_robot',
         package='ros_gz_sim',
         executable='create',
         output='screen',
-        arguments=[ '-topic', [namespace, '/robot_description'],
-                   '-name', namespace,
-                   '-allow_renaming', 'true',
-                   '-x', '-3.5',
-                   '-y', '2.2',
-                   '-z', '0.2',
-                   '-Y', '0.3'],
-        parameters=[{"use_sim_time": True}],
+        arguments=[
+            '-topic', f'/{namespace}/robot_description',
+            '-name', namespace,
+            '-allow_renaming', 'true',
+            '-x', LaunchConfiguration('x'),
+            '-y', LaunchConfiguration('y'),
+            '-z', LaunchConfiguration('z'),
+            '-Y', LaunchConfiguration('yaw'),
+        ],
+        parameters=[{'use_sim_time': True}],
     )
 
-########## TF merge #########
-
-    tf_1 = Node(
-        package="topic_tools",
-        executable="relay",
-        namespace=namespace,
-        name='relay_tf1_to_global',
-        arguments=[['tf'], '/tf'],
-        parameters=[{"use_sim_time": True}],
-    )
-
-    tf_1s = Node(
-        package="topic_tools",
-        executable="relay",
-        namespace=namespace,
-        name='relay_tf1s_to_global',
-        arguments=[['tf_static'], '/tf_static'],
-        parameters=[{"use_sim_time": True}],
-    )
-
-    twist_repub = Node(
-        package="lampo_description",
-        executable="twist_repub.py",
-        namespace=namespace,
-        name='twist_repub',
-        parameters=[{'namespace': namespace}]
-    )
-
-
-########## VISUALIZATION
-
-    world_path = os.path.join(get_package_share_directory('lampo_description'),'worlds/warehouse.sdf')
-
-    gazebo_server = GroupAction(
-        actions=[
-            IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                [os.path.join(get_package_share_directory('ros_gz_sim'),
-                              'launch', 'gz_sim.launch.py')]),
-            launch_arguments={
-                'gz_args': [' -r -v 4 ' + world_path ],
-                'gz_version': "9"
-            }.items())
-            ]
-            )
-
-    rviz_config_file = PathJoinSubstitution(
-        [FindPackageShare("lampo_description"), "rviz", "config.rviz"]
-    )
-
-    rviz_node = Node(
-        package="rviz2",
-        executable="rviz2",
-        name="rviz2",
-        output="screen",
-        parameters=[{"use_sim_time": True}],
-        arguments=["-d", rviz_config_file],
-    )
-
-
-########## BRIDGE
-
-    def create_bridge_config(context):
-        namespace_str = context.perform_substitution(namespace)
-
-        # Load original bridge config
-        bridge_file = os.path.join(get_package_share_directory('lampo_description'), 'config', 'bridge.yaml')
-        with open(bridge_file, 'r') as f:
-            bridge_data = yaml.safe_load(f)
-
-        # Perform substitutions
-        for bridge_item in bridge_data:
-            if 'ros_topic_name' in bridge_item:
-                topic = bridge_item['ros_topic_name']
-                if topic == '/prefix/cmd_vel':
-                    bridge_item['ros_topic_name'] = f'/{namespace_str}/cmd_vel'
-                elif topic == '/prefix/odom':
-                    bridge_item['ros_topic_name'] = f'/{namespace_str}/odom'
-                elif topic == '/prefix/lidar':
-                    bridge_item['ros_topic_name'] = f'/{namespace_str}/lidar'
-                elif topic == '/prefix/imu':
-                    bridge_item['ros_topic_name'] = f'/{namespace_str}/imu'
-                elif topic == '/prefix/rgbd_camera/camera_info':
-                    bridge_item['ros_topic_name'] = f'/{namespace_str}/rgbd_camera/camera_info'
-                elif topic == '/prefix/rgbd_camera/depth_image':
-                    bridge_item['ros_topic_name'] = f'/{namespace_str}/rgbd_camera/depth_image'
-                elif topic == '/prefix/rgbd_camera/image':
-                    bridge_item['ros_topic_name'] = f'/{namespace_str}/rgbd_camera/image'
-                elif topic == '/prefix/tf':
-                    bridge_item['ros_topic_name'] = f'/{namespace_str}/tf'
-
-        # Deterministic per-namespace path; see note in create_description_config.
-        bridge_out_path = os.path.join(
-            tempfile.gettempdir(), f'lampo_bridge_{namespace_str}.yaml'
-        )
-        with open(bridge_out_path, 'w') as f:
-            yaml.dump(bridge_data, f)
-
-        return [Node(
-            package="ros_gz_bridge",
-            executable="parameter_bridge",
+    def spawner(controller, *extra):
+        return Node(
+            package='controller_manager',
+            executable='spawner',
+            arguments=[controller, *extra, '--controller-manager',
+                       f'/{namespace}/controller_manager'],
             namespace=namespace,
-            output="screen",
-            parameters=[{"config_file": bridge_out_path}, {"use_sim_time": True}],
-        )]
+            output='screen',
+            condition=IfCondition(mm),
+        )
 
-    gz_bridge = OpaqueFunction(function=create_bridge_config)
+    jsb = spawner('joint_state_broadcaster')
 
-########## UR CONTROLLERS 
+    # Which controller drives the arm (doc/control.md):
+    #   forward     - forward_position_controller, as always.
+    #   pid         - arm_pid_controller: a position PID commanding velocity.
+    #   effort_pid  - arm_effort_pid_controller: a position PID commanding
+    #                 torque, so gravity and windup become visible.
+    #   servo       - forward_velocity_controller, fed joint velocities by
+    #                 MoveIt Servo from Cartesian twist commands.
+    #   effort      - forward_effort_controller: raw torque passthrough for
+    #                 the dynamics labs (zero_g.py, joint_observer.py,
+    #                 lqr_joint.py). With no node feeding it the arm simply
+    #                 falls -- which is the opening demo of exercise 4.
+    # The alternates are spawned --inactive so students can flip between the
+    # paths live with `ros2 control switch_controllers`. Never two active
+    # controllers on the same joints: they would claim conflicting command
+    # interfaces.
+    if arm_controller == 'forward':
+        arm = spawner('forward_position_controller')
+    else:
+        active = {'pid': 'arm_pid_controller',
+                  'effort_pid': 'arm_effort_pid_controller',
+                  'servo': 'forward_velocity_controller',
+                  'effort': 'forward_effort_controller'}[arm_controller]
+        arm = spawner(active)
+        arm_inactive = spawner('forward_position_controller', '--inactive')
 
-    joint_state_broadcaster_spawner = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=["joint_state_broadcaster"],
-        namespace=namespace,
-        condition=IfCondition(mm),
-    )
-
-    start_controller_spawner = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=["forward_position_controller"],
-        namespace=namespace,
-        condition=IfCondition(mm),
-    )
-
-    gripper_controller_spawner = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=["gripper_position_controller"],
-        namespace=namespace,
-        condition=IfCondition(mm),
-    )
-
-########## LAUNCHING
-
-
-    nodes_to_start = [
-        # gazebo_server,
-        # rviz_node,
-        tf_1,
-        tf_1s,
-        twist_repub,
-        robot_state_publisher_node_1,
-        TimerAction(
-            period=5.0,
-            actions=[spawn_sweepee_1,joint_state_broadcaster_spawner,start_controller_spawner,gripper_controller_spawner],
-        ),
-        TimerAction(
-            period=1.0,
-            actions=[gz_bridge]
-        ),
+    # Chain: spawn -> joint_state_broadcaster -> arm controller. Each waits for
+    # the previous process to exit, so the controller_manager always exists
+    # before a spawner talks to it and controllers activate in a deterministic
+    # order. (The old code fired all of these in one TimerAction(5.0) and hoped.)
+    #
+    # No gripper controller: see the note in urdf/mm_gripper.xacro -- the
+    # gripper is passive unless gripper_control:=true.
+    ordering = [
+        RegisterEventHandler(OnProcessExit(target_action=spawn,
+                                           on_exit=[jsb])),
+        RegisterEventHandler(OnProcessExit(target_action=jsb,
+                                           on_exit=[arm])),
     ]
+    if arm_controller != 'forward':
+        ordering.append(RegisterEventHandler(OnProcessExit(
+            target_action=arm, on_exit=[arm_inactive])))
 
-    return LaunchDescription(declared_arguments + nodes_to_start)
+    if arm_controller == 'servo':
+        # MoveIt Servo: Cartesian twists in, joint velocities out, into the
+        # forward_velocity_controller spawned above. It needs the kinematic
+        # model three ways: the URDF (same as robot_state_publisher), the
+        # SRDF (planning group + which collision pairs to ignore) and an IK
+        # solver. Started after the controllers so its planning scene finds
+        # joint states immediately.
+        robot_description_semantic = launch_ros.descriptions.ParameterValue(
+            Command([
+                PathJoinSubstitution([FindExecutable(name='xacro')]), ' ',
+                PathJoinSubstitution([FindPackageShare(
+                    LaunchConfiguration('description_package')), 'urdf',
+                    'lampo_ur.srdf.xacro']),
+                ' ', 'name:=', namespace, 'mm1',
+                ' ', 'prefix:=', namespace,
+            ]), value_type=str)
+        servo_node = Node(
+            package='moveit_servo',
+            executable='servo_node',
+            namespace=namespace,
+            output='screen',
+            condition=IfCondition(mm),
+            parameters=[
+                _render_config('ur_servo.yaml', namespace),
+                {'robot_description': robot_description,
+                 'robot_description_semantic': robot_description_semantic,
+                 'robot_description_kinematics': {'ur_manipulator': {
+                     'kinematics_solver':
+                         'kdl_kinematics_plugin/KDLKinematicsPlugin'}},
+                 'use_sim_time': True},
+            ],
+        )
+        ordering.append(RegisterEventHandler(OnProcessExit(
+            target_action=arm_inactive, on_exit=[servo_node])))
+
+    bridge_file = _render_config('bridge.yaml', namespace)
+    # bridge.yaml uses the literal "/prefix/" marker rather than PREFIX_, so it
+    # stays readable as a standalone file. One replace handles every topic --
+    # adding a topic to the yaml needs no change here.
+    with open(bridge_file) as f:
+        bridge_data = yaml.safe_load(f)
+    for item in bridge_data:
+        if 'ros_topic_name' in item:
+            item['ros_topic_name'] = item['ros_topic_name'].replace(
+                '/prefix/', f'/{namespace}/', 1)
+        if 'gz_topic_name' in item:
+            item['gz_topic_name'] = item['gz_topic_name'].replace(
+                '/prefix/', f'/{namespace}/', 1)
+    with open(bridge_file, 'w') as f:
+        yaml.dump(bridge_data, f)
+
+    gz_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        namespace=namespace,
+        output='screen',
+        # No use_sim_time: this process is downstream of /clock, and making it
+        # wait on the very clock the sandbox publishes can stall its timers.
+        parameters=[{'config_file': bridge_file}],
+    )
+
+    # Everything this robot publishes is namespaced, so a global consumer --
+    # RViz, or `ros2 run tf2_tools view_frames` -- would see nothing. Relay
+    # both transform topics onto the global ones, where the prefixed frames of
+    # any number of robots merge into a single tree.
+    #
+    # topic_tools/relay matches the input publisher's QoS, so the relayed
+    # /tf_static keeps its TRANSIENT_LOCAL durability and late joiners still
+    # receive the static transforms. (Verified on Kilted: both the source and
+    # the relayed publisher report durability TRANSIENT_LOCAL.)
+    relay_tf = Node(
+        package='topic_tools', executable='relay',
+        namespace=namespace, name='relay_tf_to_global',
+        arguments=['tf', '/tf'],
+        parameters=[{'use_sim_time': True}],
+    )
+    relay_tf_static = Node(
+        package='topic_tools', executable='relay',
+        namespace=namespace, name='relay_tf_static_to_global',
+        arguments=['tf_static', '/tf_static'],
+        parameters=[{'use_sim_time': True}],
+    )
+    return [robot_state_publisher, gz_bridge, relay_tf, relay_tf_static,
+            spawn] + ordering
 
 
+def generate_launch_description():
+    args = [
+        DeclareLaunchArgument('namespace', default_value='r1_',
+                              description='Namespace and TF prefix. Must end '
+                                          'with a separator, e.g. "r2_".'),
+        DeclareLaunchArgument('description_package',
+                              default_value='lampo_description'),
+        DeclareLaunchArgument('description_file',
+                              default_value='system.urdf.xacro'),
+        DeclareLaunchArgument('mm', default_value='false',
+                              description='Spawn as a mobile manipulator '
+                                          '(UR arm + gripper + camera).'),
+        DeclareLaunchArgument('omni', default_value='true',
+                              description='true = mecanum base, '
+                                          'false = differential base.'),
+        # EXPERIMENTAL, and off for a reason: see urdf/mm_gripper.xacro. With
+        # this true the gripper exports ros2_control interfaces, but the mimic
+        # joints of the 4-bar finger linkage drift outside their URDF limits
+        # and the joint limiter aborts the simulator with a fatal exception.
+        DeclareLaunchArgument('gripper_control', default_value='false',
+                              description='Expose the gripper through '
+                                          'ros2_control. Experimental: known '
+                                          'to crash the simulator.'),
+        # The control exercises. `pid` and `effort_pid` activate a chainable
+        # pid_controller on the arm joints; `servo` puts MoveIt Servo in
+        # front of the velocity controller -- see doc/control.md.
+        DeclareLaunchArgument('arm_controller', default_value='forward',
+                              choices=['forward', 'pid', 'effort_pid',
+                                       'servo', 'effort'],
+                              description='Which controller drives the arm: '
+                                          'forward (position passthrough), '
+                                          'pid (velocity-output PID), '
+                                          'effort_pid (torque-output PID), '
+                                          'servo (Cartesian, MoveIt Servo) '
+                                          'or effort (raw torque, for the '
+                                          'dynamics labs).'),
+        # Spawn pose. Nav2's AMCL is seeded from these same values, so the two
+        # can no longer drift apart -- see lampo_nav_omni.launch.py.
+        DeclareLaunchArgument('x', default_value='-3.5'),
+        DeclareLaunchArgument('y', default_value='2.2'),
+        DeclareLaunchArgument('z', default_value='0.2'),
+        DeclareLaunchArgument('yaw', default_value='0.3'),
+    ]
+    return LaunchDescription(args + [OpaqueFunction(function=launch_setup)])
