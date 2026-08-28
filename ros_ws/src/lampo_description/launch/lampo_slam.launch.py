@@ -56,6 +56,7 @@ def _render(name, namespace):
 
 def launch_setup(context, *args, **kwargs):
     namespace = LaunchConfiguration('namespace').perform(context)
+    noisy = LaunchConfiguration('noisy').perform(context).lower() == 'true'
 
     slam = Node(
         package='slam_toolbox',
@@ -79,6 +80,11 @@ def launch_setup(context, *args, **kwargs):
     # Optional. Off by default because the drive plugin already provides
     # odom -> base_footprint; enabling both would give two publishers of the
     # same transform. Turn the plugin's <tf_topic> off first if you use this.
+    #
+    # With noisy:=true the EKF is fed through sensor_noise.py instead of the
+    # simulator's too-perfect topics -- that is the Kalman tuning exercise of
+    # doc/control.md: the filter finally has something to filter, and the
+    # plugin's clean odom remains available as ground truth to plot against.
     ekf = Node(
         package='robot_localization',
         executable='ekf_node',
@@ -86,7 +92,17 @@ def launch_setup(context, *args, **kwargs):
         namespace=namespace,
         output='screen',
         parameters=[_render('ekf.yaml', namespace), {'use_sim_time': True}],
+        remappings=[('odom', 'odom_noisy'),
+                    ('imu', 'imu_noisy')] if noisy else [],
         condition=IfCondition(LaunchConfiguration('use_ekf')),
+    )
+    noise = Node(
+        package='lampo_description',
+        executable='sensor_noise.py',
+        namespace=namespace,
+        output='screen',
+        parameters=[{'use_sim_time': True}],
+        condition=IfCondition(LaunchConfiguration('noisy')),
     )
 
     # slam_toolbox is a LIFECYCLE node on Kilted: started on its own it sits in
@@ -113,7 +129,7 @@ def launch_setup(context, *args, **kwargs):
         }],
     )
 
-    return [slam, lifecycle, ekf]
+    return [slam, lifecycle, ekf, noise]
 
 
 def generate_launch_description():
@@ -124,5 +140,10 @@ def generate_launch_description():
             'use_ekf', default_value='false',
             description='Also run a robot_localization EKF fusing wheel '
                         'odometry with the IMU. See the note in ekf.yaml.'),
+        DeclareLaunchArgument(
+            'noisy', default_value='false',
+            description='Feed the EKF through sensor_noise.py (odom_noisy, '
+                        'imu_noisy) instead of the simulator-perfect topics. '
+                        'The Kalman tuning exercise of doc/control.md.'),
         OpaqueFunction(function=launch_setup),
     ])

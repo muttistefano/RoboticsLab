@@ -1,7 +1,7 @@
 """The documentation is true.
 
-README.md and DEMO.md are executable promises: a reader types what is written
-there and expects it to work. These tests read both documents, extract every
+The markdown documents are executable promises: a reader types what is written
+there and expects it to work. These tests read every document, extract every
 command and every argument table, and check them against the package.
 
 This catches the failure mode that is otherwise only discovered live, in front
@@ -15,7 +15,8 @@ from conftest import launch_defaults, PKG
 
 import pytest
 
-DOCS = ['README.md', 'DEMO.md']
+DOCS = ['README.md', 'DEMO.md', 'doc/install.md', 'doc/running.md',
+        'doc/architecture.md', 'doc/testing.md', 'doc/control.md']
 REPO = PKG.parents[2]          # ros_ws/src/lampo_description -> repo root
 PACKAGE = 'lampo_description'
 
@@ -47,7 +48,10 @@ def commands(name):
 def test_launch_files_referenced_actually_exist(doc):
     """Every `ros2 launch lampo_description X` names a real, installed file."""
     referenced = {m.group(1) for m in LAUNCH_CMD.finditer(document(doc))}
-    assert referenced, f'{doc} documents no launch commands'
+    # The docs whose whole point is running things must show launch commands;
+    # the others (install, architecture, testing) legitimately may not.
+    if doc in ('README.md', 'DEMO.md', 'doc/running.md', 'doc/control.md'):
+        assert referenced, f'{doc} documents no launch commands'
     for launch_file in sorted(referenced):
         assert (PKG / 'launch' / launch_file).is_file(), \
             f'{doc} references {launch_file}, which does not exist'
@@ -88,7 +92,8 @@ def test_executables_referenced_are_installed(doc):
             f'{doc} runs {match.group(1)}, which is not installed'
 
 
-def test_readme_argument_tables_match_the_launch_files():
+@pytest.mark.parametrize('doc', DOCS)
+def test_argument_tables_match_the_launch_files(doc):
     """Documented defaults are the real defaults.
 
     Each argument table follows the code block it describes. A block may name
@@ -96,7 +101,7 @@ def test_readme_argument_tables_match_the_launch_files():
     alongside it), so the table is attributed to whichever candidate actually
     declares every argument in it. If none does, that is the failure.
     """
-    text = document('README.md')
+    text = document(doc)
     candidates = []
     problems = []
 
@@ -142,12 +147,12 @@ def test_readme_argument_tables_match_the_launch_files():
 def test_every_launch_file_is_documented():
     """No launch file is undiscoverable.
 
-    A launch file the README never mentions may as well not exist -- which is
+    A launch file the docs never mention may as well not exist -- which is
     how lampo_joy.launch.py and nodo_prova.py went unnoticed.
     """
-    text = document('README.md')
+    text = '\n'.join(document(doc) for doc in DOCS)
     for path in sorted((PKG / 'launch').glob('*.launch.py')):
-        assert path.name in text, f'{path.name} is not mentioned in README.md'
+        assert path.name in text, f'{path.name} is not mentioned in any doc'
 
 
 def test_demo_recovery_commands_are_real():

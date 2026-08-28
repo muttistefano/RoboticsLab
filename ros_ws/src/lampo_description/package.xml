@@ -46,6 +46,18 @@
   <exec_depend>joint_trajectory_controller</exec_depend>
   <exec_depend>velocity_controllers</exec_depend>
   <exec_depend>ur_controllers</exec_depend>
+  <!-- The control exercises: chainable PID controllers and MoveIt Servo
+       for the Cartesian mode, doc/control.md -->
+  <exec_depend>pid_controller</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>moveit_servo</exec_depend>
+  <exec_depend>moveit_kinematics</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
+  <!-- The dynamics labs: raw effort passthrough, and pinocchio + scipy for
+       gravity compensation, the observer and the LQR (doc/control.md) -->
+  <exec_depend>effort_controllers</exec_depend>
+  <exec_depend>pinocchio</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
 
   <!-- Teleoperation -->
   <exec_depend>joy</exec_depend>

@@ -120,7 +120,7 @@ def test_every_config_uses_a_wildcard_node_key():
     configured. twist_mux, slam_toolbox and the EKF all shipped this way.
     """
     for name in ('twist_mux.yaml', 'slam_toolbox.yaml', 'ekf.yaml',
-                 'nav2_params_omni.yaml'):
+                 'nav2_params_omni.yaml', 'ur_servo.yaml'):
         keys = list(load_config(name))
         assert keys == ['/**'], f'{name} keys on {keys}, not the /** wildcard'
 
@@ -263,6 +263,28 @@ def test_controllers_config_is_namespace_agnostic():
     text = read('config', 'ur_controllers.yaml')
     assert 'PREFIX_' in text
     assert 'r1_' not in text
+
+
+def test_servo_output_feeds_the_velocity_controller():
+    """Servo's outgoing commands land where forward_velocity_controller listens.
+
+    The servo config and the controller config name each other only through a
+    topic string. If they drift apart, Servo publishes into the void: nothing
+    errors, the service calls all succeed, and the arm simply never moves.
+    """
+    servo = load_config('ur_servo.yaml')['/**']['ros__parameters']['moveit_servo']
+    assert servo['command_out_topic'] == 'forward_velocity_controller/commands'
+    # Relative on purpose: the node runs namespaced, an absolute topic would
+    # escape the namespace and be shared between robots.
+    assert not servo['command_out_topic'].startswith('/')
+    assert servo['command_out_type'] == 'std_msgs/Float64MultiArray'
+    assert servo['publish_joint_velocities'] is True
+    assert servo['publish_joint_positions'] is False
+
+    controllers = load_config('ur_controllers.yaml')['/**']
+    types = controllers['controller_manager']['ros__parameters']
+    assert types['forward_velocity_controller']['type'] == \
+        'velocity_controllers/JointGroupVelocityController'
 
 
 def test_no_package_uris_are_unresolvable():

@@ -1,5 +1,7 @@
 # RoboticsLab — Demo Run Sheet
 
+*Back to the [index](README.md).*
+
 **Slot:** ~20 minutes total. Talk ≈ 13 min, live demo ≈ 7 min.
 **Audience:** robotics-literate, new to ROS 2.
 

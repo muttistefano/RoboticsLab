@@ -22,6 +22,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-joint-trajectory-controller \
     ros-${ROS_DISTRO}-position-controllers \
     ros-${ROS_DISTRO}-velocity-controllers \
+    ros-${ROS_DISTRO}-pid-controller \
+    ros-${ROS_DISTRO}-effort-controllers \
+    ros-${ROS_DISTRO}-moveit-servo \
+    ros-${ROS_DISTRO}-moveit-kinematics \
+    ros-${ROS_DISTRO}-pinocchio \
+    python3-scipy \
     # --- robot descriptions used by the mobile manipulator ---
     ros-${ROS_DISTRO}-ur-description \
     ros-${ROS_DISTRO}-ur-simulation-gz \
@@ -43,6 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-rqt-tf-tree \
     ros-${ROS_DISTRO}-tf2-tools \
     ros-${ROS_DISTRO}-topic-tools \
+    ros-${ROS_DISTRO}-plotjuggler-ros \
     # --- build tooling and GL ---
     python3-colcon-common-extensions \
     python3-rosdep \

@@ -31,6 +31,11 @@
 
     <plugin name='gz::sim::systems::UserCommands' filename='gz-sim-user-commands-system'/>
 
+    <!-- Server side of the GUI's "Apply Force Torque" dialog. Without this
+         system the dialog publishes wrenches into the void -- and shoving
+         the robot IS part of the control exercises (doc/control.md). -->
+    <plugin name='gz::sim::systems::ApplyLinkWrench' filename='gz-sim-apply-link-wrench-system'/>
+
     <plugin name='gz::sim::systems::SceneBroadcaster' filename='gz-sim-scene-broadcaster-system'/>
 
     <plugin filename="gz-sim-imu-system"

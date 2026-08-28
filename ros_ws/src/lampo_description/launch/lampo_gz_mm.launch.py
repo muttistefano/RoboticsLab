@@ -73,6 +73,12 @@ def _render_config(name, namespace):
 def launch_setup(context, *args, **kwargs):
     namespace = LaunchConfiguration('namespace').perform(context)
     mm = LaunchConfiguration('mm')
+    arm_controller = LaunchConfiguration('arm_controller').perform(context)
+    if arm_controller not in ('forward', 'pid', 'effort_pid', 'servo',
+                              'effort'):
+        raise RuntimeError(
+            f'arm_controller must be forward, pid, effort_pid, servo or '
+            f'effort, not "{arm_controller}"')
 
     controllers_file = _render_config('ur_controllers.yaml', namespace)
 
@@ -127,11 +133,11 @@ def launch_setup(context, *args, **kwargs):
         parameters=[{'use_sim_time': True}],
     )
 
-    def spawner(controller):
+    def spawner(controller, *extra):
         return Node(
             package='controller_manager',
             executable='spawner',
-            arguments=[controller, '--controller-manager',
+            arguments=[controller, *extra, '--controller-manager',
                        f'/{namespace}/controller_manager'],
             namespace=namespace,
             output='screen',
@@ -139,7 +145,31 @@ def launch_setup(context, *args, **kwargs):
         )
 
     jsb = spawner('joint_state_broadcaster')
-    arm = spawner('forward_position_controller')
+
+    # Which controller drives the arm (doc/control.md):
+    #   forward     - forward_position_controller, as always.
+    #   pid         - arm_pid_controller: a position PID commanding velocity.
+    #   effort_pid  - arm_effort_pid_controller: a position PID commanding
+    #                 torque, so gravity and windup become visible.
+    #   servo       - forward_velocity_controller, fed joint velocities by
+    #                 MoveIt Servo from Cartesian twist commands.
+    #   effort      - forward_effort_controller: raw torque passthrough for
+    #                 the dynamics labs (zero_g.py, joint_observer.py,
+    #                 lqr_joint.py). With no node feeding it the arm simply
+    #                 falls -- which is the opening demo of exercise 4.
+    # The alternates are spawned --inactive so students can flip between the
+    # paths live with `ros2 control switch_controllers`. Never two active
+    # controllers on the same joints: they would claim conflicting command
+    # interfaces.
+    if arm_controller == 'forward':
+        arm = spawner('forward_position_controller')
+    else:
+        active = {'pid': 'arm_pid_controller',
+                  'effort_pid': 'arm_effort_pid_controller',
+                  'servo': 'forward_velocity_controller',
+                  'effort': 'forward_effort_controller'}[arm_controller]
+        arm = spawner(active)
+        arm_inactive = spawner('forward_position_controller', '--inactive')
 
     # Chain: spawn -> joint_state_broadcaster -> arm controller. Each waits for
     # the previous process to exit, so the controller_manager always exists
@@ -154,6 +184,44 @@ def launch_setup(context, *args, **kwargs):
         RegisterEventHandler(OnProcessExit(target_action=jsb,
                                            on_exit=[arm])),
     ]
+    if arm_controller != 'forward':
+        ordering.append(RegisterEventHandler(OnProcessExit(
+            target_action=arm, on_exit=[arm_inactive])))
+
+    if arm_controller == 'servo':
+        # MoveIt Servo: Cartesian twists in, joint velocities out, into the
+        # forward_velocity_controller spawned above. It needs the kinematic
+        # model three ways: the URDF (same as robot_state_publisher), the
+        # SRDF (planning group + which collision pairs to ignore) and an IK
+        # solver. Started after the controllers so its planning scene finds
+        # joint states immediately.
+        robot_description_semantic = launch_ros.descriptions.ParameterValue(
+            Command([
+                PathJoinSubstitution([FindExecutable(name='xacro')]), ' ',
+                PathJoinSubstitution([FindPackageShare(
+                    LaunchConfiguration('description_package')), 'urdf',
+                    'lampo_ur.srdf.xacro']),
+                ' ', 'name:=', namespace, 'mm1',
+                ' ', 'prefix:=', namespace,
+            ]), value_type=str)
+        servo_node = Node(
+            package='moveit_servo',
+            executable='servo_node',
+            namespace=namespace,
+            output='screen',
+            condition=IfCondition(mm),
+            parameters=[
+                _render_config('ur_servo.yaml', namespace),
+                {'robot_description': robot_description,
+                 'robot_description_semantic': robot_description_semantic,
+                 'robot_description_kinematics': {'ur_manipulator': {
+                     'kinematics_solver':
+                         'kdl_kinematics_plugin/KDLKinematicsPlugin'}},
+                 'use_sim_time': True},
+            ],
+        )
+        ordering.append(RegisterEventHandler(OnProcessExit(
+            target_action=arm_inactive, on_exit=[servo_node])))
 
     bridge_file = _render_config('bridge.yaml', namespace)
     # bridge.yaml uses the literal "/prefix/" marker rather than PREFIX_, so it
@@ -229,6 +297,19 @@ def generate_launch_description():
                               description='Expose the gripper through '
                                           'ros2_control. Experimental: known '
                                           'to crash the simulator.'),
+        # The control exercises. `pid` and `effort_pid` activate a chainable
+        # pid_controller on the arm joints; `servo` puts MoveIt Servo in
+        # front of the velocity controller -- see doc/control.md.
+        DeclareLaunchArgument('arm_controller', default_value='forward',
+                              choices=['forward', 'pid', 'effort_pid',
+                                       'servo', 'effort'],
+                              description='Which controller drives the arm: '
+                                          'forward (position passthrough), '
+                                          'pid (velocity-output PID), '
+                                          'effort_pid (torque-output PID), '
+                                          'servo (Cartesian, MoveIt Servo) '
+                                          'or effort (raw torque, for the '
+                                          'dynamics labs).'),
         # Spawn pose. Nav2's AMCL is seeded from these same values, so the two
         # can no longer drift apart -- see lampo_nav_omni.launch.py.
         DeclareLaunchArgument('x', default_value='-3.5'),

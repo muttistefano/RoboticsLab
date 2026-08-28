@@ -17,6 +17,10 @@ ament_python_install_package(${PROJECT_NAME})
 # Install runnable nodes into lib/<pkg> so `ros2 run` finds them.
 install(PROGRAMS
   lampo_description/nodo_prova.py
+  lampo_description/zero_g.py
+  lampo_description/joint_observer.py
+  lampo_description/lqr_joint.py
+  lampo_description/sensor_noise.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -53,10 +57,36 @@ if(BUILD_TESTING)
     find_package(launch_testing_ament_cmake REQUIRED)
     add_launch_test(test/integration/test_sandbox.py TIMEOUT 180)
     add_launch_test(test/integration/test_robot.py TIMEOUT 300)
+    add_launch_test(test/integration/test_arm_pid.py TIMEOUT 300)
+    add_launch_test(test/integration/test_servo.py TIMEOUT 300)
+    add_launch_test(test/integration/test_dynamics.py TIMEOUT 300)
+    add_launch_test(test/integration/test_lqr.py TIMEOUT 300)
+    add_launch_test(test/integration/test_estimation.py TIMEOUT 300)
     add_launch_test(test/integration/test_nav2.py TIMEOUT 420)
     add_launch_test(test/integration/test_slam.py TIMEOUT 300)
     add_launch_test(test/integration/test_ekf.py TIMEOUT 300)
     add_launch_test(test/integration/test_multirobot.py TIMEOUT 360)
+    # Everything in a test runs on one machine, so pin both middlewares to
+    # the local host. An active VPN otherwise swallows the discovery
+    # multicast of gz-transport AND DDS with no error anywhere: the spawner
+    # hangs at "Requesting list of world names" and subscribers never find
+    # their publishers. This must be process-level environment -- launch
+    # snapshots its environment at startup, so setting os.environ from
+    # inside the test file is already too late.
+    set_tests_properties(
+      test_integration_test_sandbox.py
+      test_integration_test_robot.py
+      test_integration_test_arm_pid.py
+      test_integration_test_servo.py
+      test_integration_test_dynamics.py
+      test_integration_test_lqr.py
+      test_integration_test_estimation.py
+      test_integration_test_nav2.py
+      test_integration_test_slam.py
+      test_integration_test_ekf.py
+      test_integration_test_multirobot.py
+      PROPERTIES ENVIRONMENT
+      "GZ_IP=127.0.0.1;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST")
   endif()
 endif()
 

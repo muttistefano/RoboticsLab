@@ -15,7 +15,7 @@ import unittest
 # on the import path. Put it there before importing the shared helpers.
 sys.path.insert(0, os.path.dirname(__file__))
 
-from helpers import collect, launch_file, NS, simulation  # noqa: E402
+from helpers import collect, launch_file, NS, simulation, wait_for  # noqa: E402
 
 from nav_msgs.msg import Odometry  # noqa: E402
 
@@ -49,11 +49,19 @@ class TestEkf(unittest.TestCase):
         rclpy.shutdown()
 
     def test_ekf_node_is_running(self):
-        """use_ekf:=true actually starts the node."""
-        names = [n for n, ns in self.node.get_node_names_and_namespaces()
-                 if ns.strip('/') == NS.strip('/')]
-        self.assertIn('ekf_filter_node', names,
-                      'use_ekf:=true did not start robot_localization')
+        """use_ekf:=true actually starts the node.
+
+        Waited for, not sampled once: node discovery takes a graph exchange
+        or two, and this test runs first in the class -- a single immediate
+        query can come back empty on a machine that is still spawning.
+        """
+        def visible():
+            return 'ekf_filter_node' in [
+                n for n, ns in self.node.get_node_names_and_namespaces()
+                if ns.strip('/') == NS.strip('/')]
+
+        self.assertTrue(wait_for(visible, timeout=90.0, node=self.node),
+                        'use_ekf:=true did not start robot_localization')
 
     def test_ekf_publishes_a_fused_estimate(self):
         """The filter produces output, in this robot's frames.

@@ -5,6 +5,7 @@ test files short enough to read as documentation of what the system is
 supposed to do.
 """
 
+import subprocess
 import time
 
 from launch import LaunchDescription
@@ -18,6 +19,13 @@ import rclpy
 
 PKG = 'lampo_description'
 NS = 'r1_'
+
+# NOTE on VPNs: an active VPN can swallow the discovery multicast of both
+# gz-transport and DDS. The cure (GZ_IP=127.0.0.1 and
+# ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST) must be process-level environment
+# -- launch snapshots its environment at startup, so setting os.environ here
+# is already too late. CMakeLists.txt sets both on every simulator test; if
+# you run a test file directly with launch_test, export them yourself.
 
 
 def launch_file(name, **arguments):
@@ -35,6 +43,14 @@ def simulation(*extra, headless=True):
     Always headless -- these run in CI and on machines without a display, and
     the GUI adds seconds of startup for nothing a test can assert on.
     """
+    # The previous test's simulator may still be dying: gz sim rides out the
+    # first SIGINT for seconds, and its server process ("gz sim server", no
+    # world name in its command line) can outlive the wrapper entirely. A
+    # leftover server silently captures this test's robot spawn -- the log
+    # says "Another world of the same name is running" and every assertion
+    # afterwards fails mysteriously. Clear the field before launching.
+    subprocess.run(['pkill', '-9', '-f', 'gz sim'], check=False)
+    time.sleep(1.0)
     return LaunchDescription([
         launch_file('lampo_sandbox.launch.py',
                     gui='false' if headless else 'true', rviz='false'),
